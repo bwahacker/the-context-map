@@ -235,11 +235,20 @@
   </div>
 
   <div id="loader">
-    <div class="loader-title">the context map</div>
-    <div class="loader-subtitle">scanning your Claude Code sessions</div>
-    <div class="bar-track"><div class="bar-fill" id="loaderFill"></div></div>
-    <div class="loader-pct" id="loaderPct">0%</div>
-    <div class="status" id="loaderStatus">initializing...</div>
+    <canvas id="loaderCanvas"></canvas>
+    <div id="loader-hud">
+      <div class="title">the context map</div>
+      <div class="subtitle">scanning your claude code sessions</div>
+      <div class="bar-track"><div class="bar-fill" id="loaderFill"></div></div>
+      <div class="status" id="loaderStatus">initializing...</div>
+      <div class="counter" id="loaderCounter"></div>
+      <div class="legend">
+        <span><div class="dot" style="background:#ff9b4a"></div><span style="color:#5a4a30">prompts</span></span>
+        <span><div class="dot" style="background:#4ade80"></div><span style="color:#2a4a30">code</span></span>
+        <span><div class="dot" style="background:#4a8bcc"></div><span style="color:#2a3a4a">files</span></span>
+        <span><div class="dot" style="background:#9b6bcc"></div><span style="color:#3a2a4a">snippets</span></span>
+      </div>
+    </div>
   </div>
 
   <svg id="graph"></svg>
@@ -280,11 +289,280 @@ svg.call(zoom);
 const tooltip=d3.select("#tooltip");
 let simulation,initialLoad=true,currentTimeRange="all",currentLinks=null,floatN=0;
 
-const loader={
-  el:document.getElementById("loader"),fill:document.getElementById("loaderFill"),
-  status:document.getElementById("loaderStatus"),pct:document.getElementById("loaderPct"),
-  set(p,m){this.fill.style.width=p+"%";this.pct.textContent=Math.round(p)+"%";if(m)this.status.textContent=m;},
-  hide(){this.el.classList.add("done");setTimeout(()=>this.el.style.display="none",600);}
+// ═══════════════════════════════════════════════════════════════════
+// 3D CODE FLYTHROUGH LOADER
+// ═══════════════════════════════════════════════════════════════════
+const loaderCanvas = document.getElementById("loaderCanvas");
+const lctx = loaderCanvas.getContext("2d");
+let loaderRunning = true;
+let discoveredItems = [];
+let particlePool = [];
+let fileCount = 0, snippetCount = 0;
+
+function resizeCanvas() {
+  const dpr = devicePixelRatio || 1;
+  loaderCanvas.width = innerWidth * dpr;
+  loaderCanvas.height = innerHeight * dpr;
+  lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeCanvas();
+addEventListener("resize", resizeCanvas);
+
+const W = () => innerWidth, H = () => innerHeight;
+
+const PALETTES = {
+  file:    ["#4a8bcc", "#3a7abb", "#5b9bdd", "#6aaade"],
+  snippet: ["#9b6bcc", "#8a5abb", "#ab7bdd", "#7b4aaa"],
+  keyword: ["#cc5b7b", "#bb4a6a", "#dd6b8b", "#aa3a5a"],
+  dim:     ["#2a2a44", "#1e1e33", "#333355", "#282844"],
+};
+
+const AMBIENT = [
+  "async function", "const data =", "return {", "import {", "export default",
+  "await fetch(", ".then(res =>", "for (const", "if (node.", "module.exports",
+  "session.id", "graph.nodes", "file_path:", "tool_use", "parseJSON(",
+  "new Map()", ".filter(n =>", "edges.push({", "timestamps[]", "readline",
+  "content.map(", "block.type ===", "forEach(item =>", "Object.keys(",
+  ".reduce((acc, x)", "require('fs')", "path.join(__dirname",
+  "JSON.parse(line)", "Buffer.from(", "stream.on('data')", "emit('change')",
+  "SELECT * FROM", "CREATE INDEX", "def __init__(self", "class Session:",
+  "fn main() {", "pub struct Node", "impl Graph for", "match result {",
+  "console.log(", "process.argv", "npm install", "git commit -m",
+];
+
+class Particle {
+  constructor() { this.reset(true); }
+
+  reset(initial = false) {
+    const item = discoveredItems.length > 3
+      ? discoveredItems[Math.floor(Math.random() * discoveredItems.length)]
+      : null;
+
+    if (item && item.type === "file" && Math.random() > 0.3) {
+      const parts = item.value.split("/");
+      this.text = parts.slice(-Math.min(2, parts.length)).join("/");
+      this.palette = PALETTES.file;
+      this.size = 11 + Math.random() * 3;
+      this.bright = true;
+    } else if (item && item.type === "snippet" && Math.random() > 0.4) {
+      this.text = item.value.length > 55 ? item.value.slice(0, 52) + "..." : item.value;
+      this.palette = PALETTES.snippet;
+      this.size = 9 + Math.random() * 3;
+      this.bright = true;
+    } else {
+      this.text = AMBIENT[Math.floor(Math.random() * AMBIENT.length)];
+      this.palette = Math.random() > 0.6 ? PALETTES.keyword : PALETTES.dim;
+      this.size = 7 + Math.random() * 5;
+      this.bright = false;
+    }
+
+    this.color = this.palette[Math.floor(Math.random() * this.palette.length)];
+
+    this.z = initial ? 200 + Math.random() * 1800 : 1600 + Math.random() * 600;
+    this.x = (Math.random() - 0.5) * 2800;
+    this.y = (Math.random() - 0.5) * 1600;
+
+    this.vz = -(100 + Math.random() * 250);
+    this.vx = (Math.random() - 0.5) * 40;
+    this.vy = (Math.random() - 0.5) * 25;
+
+    this.angle = (Math.random() - 0.5) * 0.5;
+    this.vAngle = (Math.random() - 0.5) * 0.4;
+
+    this.phase = Math.random() * Math.PI * 2;
+    this.pSpeed = 1.5 + Math.random() * 2.5;
+  }
+
+  update(dt) {
+    this.z += this.vz * dt;
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.angle += this.vAngle * dt;
+    this.phase += this.pSpeed * dt;
+
+    if (this.z < 500) {
+      const pull = 0.0004 * (1 - this.z / 500);
+      this.vx -= this.x * pull;
+      this.vy -= this.y * pull;
+    }
+
+    if (this.z < -50) this.reset();
+  }
+
+  draw(c) {
+    if (this.z <= 0) return;
+    const fov = 600;
+    const scale = fov / this.z;
+    const sx = W()/2 + this.x * scale;
+    const sy = H()/2 + this.y * scale;
+
+    if (sx < -300 || sx > W()+300 || sy < -100 || sy > H()+100) return;
+
+    const fs = Math.max(1.5, this.size * scale);
+
+    let alpha;
+    if (this.z > 1400) alpha = (2000 - this.z) / 600;
+    else if (this.z < 80) alpha = this.z / 80;
+    else alpha = 1;
+    alpha = Math.max(0, Math.min(1, alpha));
+
+    // Fade particles near center so they don't obscure the HUD
+    const cx = sx - W()/2, cy = sy - H()/2;
+    const distFromCenter = Math.sqrt(cx*cx + cy*cy);
+    const hudRadius = 200;
+    if (distFromCenter < hudRadius && this.z < 600) {
+      alpha *= Math.max(0.1, distFromCenter / hudRadius);
+    }
+
+    const pulse = 0.5 + 0.5 * Math.sin(this.phase);
+
+    c.save();
+    c.translate(sx, sy);
+
+    const tilt = this.angle * Math.min(scale * 0.4, 0.15);
+    c.rotate(tilt);
+
+    if (this.z < 350 && this.bright && fs > 9) {
+      c.shadowColor = this.color;
+      c.shadowBlur = 12 + pulse * 16;
+    }
+
+    if (this.z < 200 && fs > 10) {
+      c.globalAlpha = alpha * 0.1;
+      c.fillStyle = this.color;
+      c.font = `${fs}px 'SF Mono','Fira Code',monospace`;
+      c.fillText(this.text, 2, -2);
+    }
+
+    c.font = `${fs}px 'SF Mono','Fira Code',monospace`;
+    c.fillStyle = this.color;
+    c.globalAlpha = alpha * (0.3 + 0.7 * pulse);
+    c.fillText(this.text, 0, 0);
+
+    c.restore();
+  }
+}
+
+// Background starfield
+const stars = [];
+for (let i = 0; i < 250; i++) {
+  stars.push({
+    x: (Math.random()-0.5)*3000, y: (Math.random()-0.5)*2000,
+    z: Math.random()*2000, vz: -(30 + Math.random()*50),
+    brightness: 0.2 + Math.random()*0.5
+  });
+}
+
+// Vertical grid lines
+const gridLines = [];
+for (let i = 0; i < 30; i++) {
+  gridLines.push({
+    x: (Math.random()-0.5)*2000, z: Math.random()*2000, vz: -(60+Math.random()*40)
+  });
+}
+
+// Init particles
+for (let i = 0; i < 70; i++) particlePool.push(new Particle());
+
+let lt = performance.now();
+function animateLoader(now) {
+  if (!loaderRunning) return;
+  const dt = Math.min((now - lt) / 1000, 0.05);
+  lt = now;
+
+  lctx.clearRect(0, 0, W(), H());
+
+  // Background gradient
+  const bg = lctx.createRadialGradient(W()/2, H()/2, 0, W()/2, H()/2, W()*0.8);
+  bg.addColorStop(0, "#0c0c18");
+  bg.addColorStop(0.5, "#080812");
+  bg.addColorStop(1, "#040408");
+  lctx.fillStyle = bg;
+  lctx.fillRect(0, 0, W(), H());
+
+  // Grid lines
+  lctx.strokeStyle = "rgba(60,60,120,0.04)";
+  lctx.lineWidth = 1;
+  for (const gl of gridLines) {
+    gl.z += gl.vz * dt;
+    if (gl.z < 1) { gl.z = 2000; gl.x = (Math.random()-0.5)*2000; }
+    const s = 600 / gl.z;
+    const sx = W()/2 + gl.x * s;
+    const a = Math.min(0.08, s * 0.05);
+    lctx.globalAlpha = a;
+    lctx.beginPath();
+    lctx.moveTo(sx, 0);
+    lctx.lineTo(sx, H());
+    lctx.stroke();
+  }
+  lctx.globalAlpha = 1;
+
+  // Stars
+  for (const s of stars) {
+    s.z += s.vz * dt;
+    if (s.z < 1) { s.z = 2000; s.x = (Math.random()-0.5)*3000; s.y = (Math.random()-0.5)*2000; }
+    const sc = 600 / s.z;
+    const sx = W()/2 + s.x * sc;
+    const sy = H()/2 + s.y * sc;
+    const r = Math.max(0.3, 1.2 * sc);
+
+    if (s.z < 300) {
+      const streak = (300 - s.z) / 300 * 20 * sc;
+      lctx.strokeStyle = `rgba(120,120,200,${Math.min(0.3, sc * 0.2 * s.brightness)})`;
+      lctx.lineWidth = r * 0.5;
+      lctx.beginPath();
+      lctx.moveTo(sx, sy);
+      lctx.lineTo(sx, sy + streak);
+      lctx.stroke();
+    }
+
+    lctx.beginPath();
+    lctx.arc(sx, sy, r, 0, Math.PI*2);
+    lctx.fillStyle = `rgba(140,140,220,${Math.min(0.7, sc * 0.4 * s.brightness)})`;
+    lctx.fill();
+  }
+
+  // Particles — depth sort
+  particlePool.sort((a, b) => b.z - a.z);
+  for (const p of particlePool) { p.update(dt); p.draw(lctx); }
+
+  // Grow particle count with discoveries
+  if (discoveredItems.length > 30 && particlePool.length < 140) {
+    particlePool.push(new Particle());
+  }
+
+  // Subtle center glow
+  const cg = lctx.createRadialGradient(W()/2, H()/2, 0, W()/2, H()/2, 200);
+  cg.addColorStop(0, "rgba(80,80,180,0.03)");
+  cg.addColorStop(1, "rgba(0,0,0,0)");
+  lctx.fillStyle = cg;
+  lctx.fillRect(0, 0, W(), H());
+
+  requestAnimationFrame(animateLoader);
+}
+requestAnimationFrame(animateLoader);
+
+// Loader controller — talks to the HUD elements
+const loader = {
+  el: document.getElementById("loader"),
+  fill: document.getElementById("loaderFill"),
+  status: document.getElementById("loaderStatus"),
+  counter: document.getElementById("loaderCounter"),
+  set(p, m) {
+    this.fill.style.width = p + "%";
+    if (m) this.status.textContent = m;
+    this.counter.textContent = fileCount + " files \u00b7 " + snippetCount + " snippets";
+  },
+  hide() {
+    this.el.classList.add("done");
+    setTimeout(() => { this.el.style.display = "none"; loaderRunning = false; }, 900);
+  },
+  // Feed discovered items into the flythrough
+  addDiscovery(type, value) {
+    discoveredItems.push({ type, value });
+    if (type === "file") fileCount++;
+    else snippetCount++;
+  }
 };
 
 // ── Search ──
@@ -388,14 +666,37 @@ async function loadGraph(){
   var params=new URLSearchParams();
   if(project)params.set("project",project);if(min>1)params.set("minSessions",min);
   if(currentTimeRange!=="all")params.set("timeRange",currentTimeRange);
-  if(initialLoad)loader.set(30,"scanning session files...");
+
+  if(initialLoad){
+    // Use SSE streaming to feed discoveries into the 3D flythrough
+    loader.set(30,"scanning session files...");
+    await new Promise(function(resolve){
+      var es=new EventSource("/api/scan-stream");
+      es.addEventListener("progress",function(e){
+        var d=JSON.parse(e.data);
+        loader.set(30+d.pct*0.5, "scanning... "+d.pct+"%");
+      });
+      es.addEventListener("discovery",function(e){
+        var d=JSON.parse(e.data);
+        if(d.type==="file") loader.addDiscovery("file",d.value||d.file||"");
+        else if(d.type==="snippet") loader.addDiscovery("snippet",d.value||d.text||"");
+      });
+      es.addEventListener("done",function(e){
+        es.close();
+        resolve();
+      });
+      es.onerror=function(){es.close();resolve();};
+    });
+  }
+
+  loader.set(80,"building graph...");
   var graph=await fetch("/api/graph?"+params).then(function(r){return r.json();});
-  if(initialLoad)loader.set(80,"building graph ("+graph.nodes.length+" nodes)...");
+  loader.set(90,"building graph ("+graph.nodes.length+" nodes)...");
   document.getElementById("statNodes").textContent=graph.nodes.length;
   document.getElementById("statEdges").textContent=graph.edges.length;
   document.getElementById("statShared").textContent=graph.stats?graph.stats.sharedFiles||0:0;
   render(graph);
-  if(initialLoad){loader.set(100,"done");setTimeout(function(){loader.hide();},400);initialLoad=false;}
+  if(initialLoad){loader.set(100,"done");setTimeout(function(){loader.hide();},800);initialLoad=false;}
 }
 
 function render(graph){
