@@ -49,30 +49,45 @@ app.get("/api/scan-stream", async (req, res) => {
     return;
   }
 
-  // Phase 1: progress events during scan
-  cachedData = await scanAllSessions((evt) => {
-    if (closed) return;
-    if (evt.type === "progress") {
-      send("progress", evt);
+  // Stream discoveries LIVE during scan — batch and flush frequently
+  let pendingBatch = [];
+  const budget = { prompt: 400, code: 400, response: 300, file: 200, snippet: 150, title: 100 };
+  const counts = {};
+
+  const flushBatch = () => {
+    if (closed || pendingBatch.length === 0) return;
+    send("discoveries", { items: pendingBatch });
+    pendingBatch = [];
+  };
+
+  cachedData = await scanAllSessions(
+    // onProgress
+    (evt) => {
+      if (closed) return;
+      if (evt.type === "progress") {
+        send("progress", evt);
+        // Flush accumulated discoveries with each file completion
+        flushBatch();
+      }
+    },
+    // onDiscovery — called for EACH discovery as it's found during parsing
+    (item) => {
+      if (closed) return;
+      const limit = budget[item.type] || 50;
+      counts[item.type] = (counts[item.type] || 0) + 1;
+      if (counts[item.type] <= limit) {
+        pendingBatch.push(item);
+        // Flush every 30 items for responsive streaming
+        if (pendingBatch.length >= 30) flushBatch();
+      }
     }
-  });
+  );
   cacheTime = Date.now();
 
   if (closed) return;
 
-  // Phase 2: stream discoveries reverse-chronologically (newest first = time travel)
-  // Thin out to ~800 items max, keeping a good mix of types
-  const disc = cachedData.discoveries;
-  const budget = { prompt: 200, code: 200, response: 150, file: 100, snippet: 80, title: 50 };
-  const counts = {};
-  const selected = [];
-  for (const d of disc) {
-    const limit = budget[d.type] || 50;
-    counts[d.type] = (counts[d.type] || 0) + 1;
-    if (counts[d.type] <= limit) selected.push(d);
-  }
-
-  send("discoveries", { items: selected });
+  // Flush any remaining
+  flushBatch();
 
   send("done", {
     nodes: cachedData.graph.nodes.length,

@@ -254,7 +254,7 @@ function decodeProjectPath(encoded) {
   return encoded;
 }
 
-async function scanAllSessions(onProgress) {
+async function scanAllSessions(onProgress, onDiscovery) {
   const projects = [];
 
   if (!fs.existsSync(PROJECTS_DIR)) {
@@ -278,7 +278,18 @@ async function scanAllSessions(onProgress) {
   }
 
   const allSessions = [];
-  const discoveries = onProgress ? [] : null;
+  const _discoveries = [];
+  // If onDiscovery callback provided, notify on each push
+  const discoveries = (onProgress || onDiscovery) ? new Proxy(_discoveries, {
+    get(target, prop) {
+      if (prop === "push") return (...items) => {
+        const result = target.push(...items);
+        if (onDiscovery) for (const item of items) onDiscovery(item);
+        return result;
+      };
+      return target[prop];
+    }
+  }) : null;
 
   for (const projDir of projectDirs) {
     const projPath = path.join(PROJECTS_DIR, projDir);
@@ -331,15 +342,15 @@ async function scanAllSessions(onProgress) {
   const graph = buildGraph(allSessions);
 
   // Sort discoveries reverse-chronologically (newest first) for time-travel flythrough
-  if (discoveries) {
-    discoveries.sort((a, b) => {
+  if (_discoveries.length) {
+    _discoveries.sort((a, b) => {
       const ta = a.ts ? new Date(a.ts).getTime() : 0;
       const tb = b.ts ? new Date(b.ts).getTime() : 0;
       return tb - ta; // newest first
     });
   }
 
-  return { projects, sessions: allSessions, graph, discoveries: discoveries || [] };
+  return { projects, sessions: allSessions, graph, discoveries: _discoveries };
 }
 
 function buildGraph(sessions) {
