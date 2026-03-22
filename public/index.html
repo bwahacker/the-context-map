@@ -124,51 +124,55 @@
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       display: flex; flex-direction: column; align-items: center; z-index: 2;
       pointer-events: none;
+      padding: 40px 60px;
+      background: radial-gradient(ellipse at center, rgba(5,5,8,0.92) 0%, rgba(5,5,8,0.7) 60%, transparent 100%);
+      border-radius: 16px;
     }
     #loader-hud .title {
-      font-size: 18px; color: #7b7bff; font-weight: 600;
-      letter-spacing: 6px; text-transform: uppercase;
-      text-shadow: 0 0 30px rgba(123,123,255,0.4);
+      font-size: 22px; color: #9b9bff; font-weight: 600;
+      letter-spacing: 8px; text-transform: uppercase;
+      text-shadow: 0 0 40px rgba(123,123,255,0.5), 0 0 80px rgba(123,123,255,0.2);
       margin-bottom: 20px;
     }
     #loader-hud .subtitle {
-      font-size: 11px; color: #3a3a55; margin-bottom: 16px;
-      letter-spacing: 2px;
+      font-size: 11px; color: #4a4a66; margin-bottom: 20px;
+      letter-spacing: 3px;
     }
     #loader-hud .bar-track {
-      width: 280px; height: 2px; background: #111118; border-radius: 2px; overflow: hidden;
-      box-shadow: 0 0 8px rgba(0,0,0,0.3);
+      width: 320px; height: 2px; background: #15151f; border-radius: 2px; overflow: hidden;
+      box-shadow: 0 0 12px rgba(0,0,0,0.4), 0 0 2px rgba(123,123,255,0.1);
     }
     #loader-hud .bar-fill {
       height: 100%; width: 0%;
-      background: linear-gradient(90deg, #3a3a88, #7b7bff, #3a3a88);
+      background: linear-gradient(90deg, #3a3a88, #7b7bff, #9b9bff, #7b7bff, #3a3a88);
       border-radius: 2px; transition: width 0.3s ease;
+      box-shadow: 0 0 8px rgba(123,123,255,0.4);
     }
     #loader-hud .status {
-      font-size: 10px; color: #2a2a44; margin-top: 10px; letter-spacing: 1px;
+      font-size: 10px; color: #3a3a55; margin-top: 12px; letter-spacing: 1px;
     }
     #loader-hud .counter {
-      font-size: 10px; color: #333; margin-top: 4px;
+      font-size: 10px; color: #444; margin-top: 6px;
       font-variant-numeric: tabular-nums;
     }
     #loader-hud .legend {
-      display: flex; gap: 16px; margin-top: 16px; font-size: 10px;
+      display: flex; gap: 16px; margin-top: 18px; font-size: 10px;
     }
     #loader-hud .legend span { display: flex; align-items: center; gap: 4px; }
     #loader-hud .legend .dot {
       width: 6px; height: 6px; border-radius: 50%;
     }
-    /* HUD corner brackets for that sci-fi feel */
+    /* HUD corner brackets */
     #loader-hud::before, #loader-hud::after {
-      content: ''; position: absolute; width: 30px; height: 30px;
-      border-color: rgba(123,123,255,0.15); border-style: solid; border-width: 0;
+      content: ''; position: absolute; width: 40px; height: 40px;
+      border-color: rgba(123,123,255,0.2); border-style: solid; border-width: 0;
     }
     #loader-hud::before {
-      top: -20px; left: -30px;
+      top: 8px; left: 12px;
       border-top-width: 1px; border-left-width: 1px;
     }
     #loader-hud::after {
-      bottom: -20px; right: -30px;
+      bottom: 8px; right: 12px;
       border-bottom-width: 1px; border-right-width: 1px;
     }
 
@@ -245,8 +249,9 @@
       <div class="legend">
         <span><div class="dot" style="background:#ff9b4a"></div><span style="color:#5a4a30">prompts</span></span>
         <span><div class="dot" style="background:#4ade80"></div><span style="color:#2a4a30">code</span></span>
+        <span><div class="dot" style="background:#6bb8e0"></div><span style="color:#2a3a4a">responses</span></span>
         <span><div class="dot" style="background:#4a8bcc"></div><span style="color:#2a3a4a">files</span></span>
-        <span><div class="dot" style="background:#9b6bcc"></div><span style="color:#3a2a4a">snippets</span></span>
+        <span><div class="dot" style="background:#ffd700"></div><span style="color:#4a4a30">titles</span></span>
       </div>
     </div>
   </div>
@@ -296,8 +301,12 @@ const loaderCanvas = document.getElementById("loaderCanvas");
 const lctx = loaderCanvas.getContext("2d");
 let loaderRunning = true;
 let discoveredItems = [];
+let discoveryQueue = [];
 let particlePool = [];
-let fileCount = 0, snippetCount = 0;
+let timePlanes = []; // date/time separator planes flying toward camera
+let fileCount = 0, snippetCount = 0, promptCount = 0, codeCount = 0, responseCount = 0;
+let loadProgress = 0;
+let queueTimer = 0; // accumulator for draining queue
 
 function resizeCanvas() {
   const dpr = devicePixelRatio || 1;
@@ -311,10 +320,13 @@ addEventListener("resize", resizeCanvas);
 const W = () => innerWidth, H = () => innerHeight;
 
 const PALETTES = {
-  file:    ["#4a8bcc", "#3a7abb", "#5b9bdd", "#6aaade"],
-  snippet: ["#9b6bcc", "#8a5abb", "#ab7bdd", "#7b4aaa"],
-  keyword: ["#cc5b7b", "#bb4a6a", "#dd6b8b", "#aa3a5a"],
-  dim:     ["#2a2a44", "#1e1e33", "#333355", "#282844"],
+  prompt:  ["#ffaa55", "#ffbb66", "#ff9933", "#ffcc77", "#ff8800"],  // HOT orange
+  code:    ["#55ff88", "#66ffaa", "#44ee77", "#88ffbb", "#33dd66"],  // BRIGHT green
+  response:["#77ccff", "#88ddff", "#66bbee", "#99eeff", "#55aadd"],  // bright cyan-blue
+  file:    ["#55aaee", "#66bbff", "#4499dd", "#77ccff", "#3388cc"],  // vivid blue
+  snippet: ["#bb88ee", "#cc99ff", "#aa77dd", "#dd99ff", "#9966cc"],  // bright purple
+  title:   ["#ffdd44", "#ffee66", "#ffcc22", "#ffff77", "#eebb00"],  // GOLD
+  dim:     ["#3a3a55", "#2e2e44", "#444466", "#333355"],             // ambient
 };
 
 const AMBIENT = [
@@ -338,22 +350,27 @@ class Particle {
       ? discoveredItems[Math.floor(Math.random() * discoveredItems.length)]
       : null;
 
-    if (item && item.type === "file" && Math.random() > 0.3) {
-      const parts = item.value.split("/");
-      this.text = parts.slice(-Math.min(2, parts.length)).join("/");
-      this.palette = PALETTES.file;
-      this.size = 11 + Math.random() * 3;
-      this.bright = true;
-    } else if (item && item.type === "snippet" && Math.random() > 0.4) {
-      this.text = item.value.length > 55 ? item.value.slice(0, 52) + "..." : item.value;
-      this.palette = PALETTES.snippet;
-      this.size = 9 + Math.random() * 3;
+    if (item && Math.random() > 0.2) {
+      const val = item.value || "";
+      this.kind = item.type;
+      if (item.type === "file") {
+        const parts = val.split("/");
+        this.text = parts.slice(-Math.min(2, parts.length)).join("/");
+      } else if (item.type === "title") {
+        this.text = val;
+      } else {
+        this.text = val.length > 70 ? val.slice(0, 67) + "..." : val;
+      }
+      this.palette = PALETTES[item.type] || PALETTES.dim;
+      const big = item.type === "prompt" || item.type === "title" || item.type === "file";
+      this.size = big ? 15 + Math.random() * 5 : 12 + Math.random() * 4;
       this.bright = true;
     } else {
       this.text = AMBIENT[Math.floor(Math.random() * AMBIENT.length)];
-      this.palette = Math.random() > 0.6 ? PALETTES.keyword : PALETTES.dim;
-      this.size = 7 + Math.random() * 5;
+      this.palette = PALETTES.dim;
+      this.size = 9 + Math.random() * 5;
       this.bright = false;
+      this.kind = "ambient";
     }
 
     this.color = this.palette[Math.floor(Math.random() * this.palette.length)];
@@ -374,9 +391,11 @@ class Particle {
   }
 
   update(dt) {
-    this.z += this.vz * dt;
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
+    // Accelerate as loading progresses: 1x at 0%, up to 3x at 100%
+    const accel = 1 + (loadProgress / 100) * 2;
+    this.z += this.vz * accel * dt;
+    this.x += this.vx * accel * dt;
+    this.y += this.vy * accel * dt;
     this.angle += this.vAngle * dt;
     this.phase += this.pSpeed * dt;
 
@@ -409,9 +428,9 @@ class Particle {
     // Fade particles near center so they don't obscure the HUD
     const cx = sx - W()/2, cy = sy - H()/2;
     const distFromCenter = Math.sqrt(cx*cx + cy*cy);
-    const hudRadius = 200;
-    if (distFromCenter < hudRadius && this.z < 600) {
-      alpha *= Math.max(0.1, distFromCenter / hudRadius);
+    const hudRadius = 320;
+    if (distFromCenter < hudRadius) {
+      alpha *= Math.max(0.05, Math.pow(distFromCenter / hudRadius, 2));
     }
 
     const pulse = 0.5 + 0.5 * Math.sin(this.phase);
@@ -422,21 +441,63 @@ class Particle {
     const tilt = this.angle * Math.min(scale * 0.4, 0.15);
     c.rotate(tilt);
 
-    if (this.z < 350 && this.bright && fs > 9) {
+    const isPrompt = this.kind === "prompt";
+    const isCode = this.kind === "code";
+    const isResponse = this.kind === "response";
+    const isTitle = this.kind === "title";
+
+    // Glow — stronger for prompts and titles
+    if (this.z < 400 && this.bright && fs > 8) {
       c.shadowColor = this.color;
-      c.shadowBlur = 12 + pulse * 16;
+      c.shadowBlur = isPrompt || isTitle ? (16 + pulse * 24) : isCode ? (10 + pulse * 18) : (12 + pulse * 16);
     }
 
+    // Motion streak
     if (this.z < 200 && fs > 10) {
-      c.globalAlpha = alpha * 0.1;
+      c.globalAlpha = alpha * (isPrompt ? 0.15 : 0.1);
       c.fillStyle = this.color;
-      c.font = `${fs}px 'SF Mono','Fira Code',monospace`;
-      c.fillText(this.text, 2, -2);
+      c.font = `${isPrompt ? "italic " : ""}${fs}px 'SF Mono','Fira Code',monospace`;
+      c.fillText(this.text, 3, -3);
     }
 
-    c.font = `${fs}px 'SF Mono','Fira Code',monospace`;
+    // Font style per type
+    const fontStyle = isPrompt ? "italic " : isTitle ? "bold " : "";
+    c.font = `${fontStyle}${fs}px 'SF Mono','Fira Code',monospace`;
     c.fillStyle = this.color;
-    c.globalAlpha = alpha * (0.3 + 0.7 * pulse);
+    c.globalAlpha = alpha * (isPrompt || isTitle ? (0.5 + 0.5 * pulse) : (0.3 + 0.7 * pulse));
+
+    // Prompt: subtle warm bg highlight when close
+    if (isPrompt && this.z < 500 && fs > 10) {
+      const tw = c.measureText(this.text).width;
+      c.globalAlpha = alpha * 0.06;
+      c.fillStyle = "#ff9b4a";
+      c.fillRect(-4, -fs * 0.8, tw + 8, fs * 1.1);
+      c.fillStyle = this.color;
+      c.globalAlpha = alpha * (0.5 + 0.5 * pulse);
+    }
+
+    // Code: left gutter accent
+    if (isCode && this.z < 500 && fs > 10) {
+      c.globalAlpha = alpha * 0.35;
+      c.fillStyle = this.color;
+      c.fillRect(-6, -fs * 0.8, 2, fs * 1.1);
+      c.globalAlpha = alpha * (0.3 + 0.7 * pulse);
+    }
+
+    // Response: subtle italic tint
+    if (isResponse) {
+      c.font = `italic ${fs}px 'SF Mono','Fira Code',monospace`;
+    }
+
+    // Title: underline accent
+    if (isTitle && this.z < 500 && fs > 10) {
+      const tw = c.measureText(this.text).width;
+      c.globalAlpha = alpha * 0.2;
+      c.fillStyle = this.color;
+      c.fillRect(0, 3, tw, 1);
+      c.globalAlpha = alpha * (0.5 + 0.5 * pulse);
+    }
+
     c.fillText(this.text, 0, 0);
 
     c.restore();
@@ -459,6 +520,126 @@ for (let i = 0; i < 30; i++) {
   gridLines.push({
     x: (Math.random()-0.5)*2000, z: Math.random()*2000, vz: -(60+Math.random()*40)
   });
+}
+
+// Time planes — flat horizontal bars that show date/time markers
+class TimePlane {
+  constructor(label, relLabel, z) {
+    this.label = label;       // "Mar 20, 2026 3:00 PM"
+    this.relLabel = relLabel; // "2 hours ago"
+    this.z = z || 2000;
+    this.vz = -(140 + Math.random() * 60);
+    this.opacity = 0;
+  }
+  update(dt) {
+    const accel = 1 + (loadProgress / 100) * 2;
+    this.z += this.vz * accel * dt;
+    // Fade in as it approaches, hold, fade out
+    if (this.z > 1200) this.opacity = Math.min(1, (2000 - this.z) / 400);
+    else if (this.z < 100) this.opacity = Math.max(0, this.z / 100);
+    else this.opacity = 1;
+    return this.z > -50;
+  }
+  draw(c) {
+    if (this.z <= 0 || this.opacity <= 0) return;
+    const fov = 600;
+    const scale = fov / this.z;
+    const sy = H() / 2 + 20 * scale; // slightly below center
+    const lineW = W() * 0.8;
+    const lx = (W() - lineW) / 2;
+
+    c.save();
+    c.globalAlpha = this.opacity * 0.3;
+
+    // Horizontal line — the "plane"
+    const grad = c.createLinearGradient(lx, sy, lx + lineW, sy);
+    grad.addColorStop(0, "transparent");
+    grad.addColorStop(0.2, "#4a4a8a");
+    grad.addColorStop(0.5, "#7b7bff");
+    grad.addColorStop(0.8, "#4a4a8a");
+    grad.addColorStop(1, "transparent");
+    c.strokeStyle = grad;
+    c.lineWidth = Math.max(0.5, 2 * scale);
+    c.beginPath();
+    c.moveTo(lx, sy);
+    c.lineTo(lx + lineW, sy);
+    c.stroke();
+
+    // Date label — centered above the line
+    const fs = Math.max(6, Math.min(16, 14 * scale));
+    c.font = `600 ${fs}px 'SF Mono','Fira Code',monospace`;
+    c.textAlign = "center";
+    c.fillStyle = "#7b7bff";
+    c.globalAlpha = this.opacity * 0.6;
+    c.fillText(this.label, W() / 2, sy - 8 * scale);
+
+    // Relative time — below the line
+    const fs2 = Math.max(5, Math.min(12, 10 * scale));
+    c.font = `${fs2}px 'SF Mono','Fira Code',monospace`;
+    c.fillStyle = "#555577";
+    c.globalAlpha = this.opacity * 0.4;
+    c.fillText(this.relLabel, W() / 2, sy + 14 * scale);
+
+    c.restore();
+  }
+}
+
+// Queue drain — pulls items from discoveryQueue into discoveredItems and spawns time planes
+function drainQueue(dt) {
+  if (discoveryQueue.length === 0) return;
+  // Drain faster as we have more items: 15-60 items/sec
+  const rate = 15 + Math.min(45, discoveryQueue.length / 10);
+  queueTimer += dt * rate;
+  let lastDateKey = "";
+  while (queueTimer >= 1 && discoveryQueue.length > 0) {
+    queueTimer -= 1;
+    const item = discoveryQueue.shift();
+    discoveredItems.push(item);
+
+    // Count types
+    if (item.type === "prompt") promptCount++;
+    else if (item.type === "code") codeCount++;
+    else if (item.type === "response") responseCount++;
+    else if (item.type === "file") fileCount++;
+    else snippetCount++;
+
+    // Spawn time plane on date boundaries
+    if (item.ts) {
+      const d = new Date(item.ts);
+      // Round to nearest hour
+      const hourKey = d.toLocaleDateString() + " " + d.getHours() + ":00";
+      if (hourKey !== lastDateKey && hourKey !== drainQueue._lastPlaneKey) {
+        lastDateKey = hourKey;
+        drainQueue._lastPlaneKey = hourKey;
+        const label = d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " +
+                      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        const ago = relTime(d);
+        timePlanes.push(new TimePlane(label, ago, 2200));
+      }
+    }
+
+    // Update status with latest prompt text
+    if (item.type === "prompt" && loader.status) {
+      loader.status.textContent = item.value.slice(0, 50);
+      loader.status.style.color = "#ff9b4a";
+      setTimeout(() => { if (loader.status) loader.status.style.color = ""; }, 300);
+    }
+  }
+  // Update counter display
+  if (loader.counter) loader.updateCounter();
+}
+drainQueue._lastPlaneKey = "";
+
+function relTime(d) {
+  const ms = Date.now() - d.getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + " min ago";
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + " hr" + (hrs > 1 ? "s" : "") + " ago";
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return days + " day" + (days > 1 ? "s" : "") + " ago";
+  return Math.floor(days / 30) + " month" + (days > 30 ? "s" : "") + " ago";
 }
 
 // Init particles
@@ -484,7 +665,8 @@ function animateLoader(now) {
   lctx.strokeStyle = "rgba(60,60,120,0.04)";
   lctx.lineWidth = 1;
   for (const gl of gridLines) {
-    gl.z += gl.vz * dt;
+    const accelEnv = 1 + (loadProgress / 100) * 2;
+    gl.z += gl.vz * accelEnv * dt;
     if (gl.z < 1) { gl.z = 2000; gl.x = (Math.random()-0.5)*2000; }
     const s = 600 / gl.z;
     const sx = W()/2 + gl.x * s;
@@ -499,7 +681,7 @@ function animateLoader(now) {
 
   // Stars
   for (const s of stars) {
-    s.z += s.vz * dt;
+    s.z += s.vz * (1 + (loadProgress / 100) * 2) * dt;
     if (s.z < 1) { s.z = 2000; s.x = (Math.random()-0.5)*3000; s.y = (Math.random()-0.5)*2000; }
     const sc = 600 / s.z;
     const sx = W()/2 + s.x * sc;
@@ -520,6 +702,15 @@ function animateLoader(now) {
     lctx.arc(sx, sy, r, 0, Math.PI*2);
     lctx.fillStyle = `rgba(140,140,220,${Math.min(0.7, sc * 0.4 * s.brightness)})`;
     lctx.fill();
+  }
+
+  // Drain discovery queue (time-travel: newest first)
+  drainQueue(dt);
+
+  // Time planes — render behind particles (depth sorted with them)
+  for (let i = timePlanes.length - 1; i >= 0; i--) {
+    if (!timePlanes[i].update(dt)) { timePlanes.splice(i, 1); continue; }
+    timePlanes[i].draw(lctx);
   }
 
   // Particles — depth sort
@@ -549,19 +740,21 @@ const loader = {
   status: document.getElementById("loaderStatus"),
   counter: document.getElementById("loaderCounter"),
   set(p, m) {
+    loadProgress = p;
     this.fill.style.width = p + "%";
     if (m) this.status.textContent = m;
-    this.counter.textContent = fileCount + " files \u00b7 " + snippetCount + " snippets";
+    this.counter.textContent = promptCount + " prompts \u00b7 " + codeCount + " code \u00b7 " + fileCount + " files";
+  },
+  updateCounter() {
+    this.counter.textContent = promptCount + " prompts \u00b7 " + codeCount + " code \u00b7 " + fileCount + " files";
   },
   hide() {
     this.el.classList.add("done");
     setTimeout(() => { this.el.style.display = "none"; loaderRunning = false; }, 900);
   },
-  // Feed discovered items into the flythrough
-  addDiscovery(type, value) {
-    discoveredItems.push({ type, value });
-    if (type === "file") fileCount++;
-    else snippetCount++;
+  // Load bulk discoveries into the queue (already sorted newest-first by server)
+  loadDiscoveries(items) {
+    discoveryQueue.push(...items);
   }
 };
 
@@ -668,7 +861,7 @@ async function loadGraph(){
   if(currentTimeRange!=="all")params.set("timeRange",currentTimeRange);
 
   if(initialLoad){
-    // Use SSE streaming to feed discoveries into the 3D flythrough
+    // Use SSE streaming — server scans, then sends discoveries newest-first
     loader.set(30,"scanning session files...");
     await new Promise(function(resolve){
       var es=new EventSource("/api/scan-stream");
@@ -676,10 +869,13 @@ async function loadGraph(){
         var d=JSON.parse(e.data);
         loader.set(30+d.pct*0.5, "scanning... "+d.pct+"%");
       });
-      es.addEventListener("discovery",function(e){
+      es.addEventListener("discoveries",function(e){
         var d=JSON.parse(e.data);
-        if(d.type==="file") loader.addDiscovery("file",d.value||d.file||"");
-        else if(d.type==="snippet") loader.addDiscovery("snippet",d.value||d.text||"");
+        if(d.items){
+          // Items are sorted newest-first by server — load into queue for time-travel
+          loader.loadDiscoveries(d.items);
+          loader.set(85, "flying back through time...");
+        }
       });
       es.addEventListener("done",function(e){
         es.close();
@@ -696,7 +892,13 @@ async function loadGraph(){
   document.getElementById("statEdges").textContent=graph.edges.length;
   document.getElementById("statShared").textContent=graph.stats?graph.stats.sharedFiles||0:0;
   render(graph);
-  if(initialLoad){loader.set(100,"done");setTimeout(function(){loader.hide();},800);initialLoad=false;}
+  if(initialLoad){
+    loader.set(100,"done");
+    // Give the time-travel flythrough a few seconds to play before dismissing
+    var dismissDelay = Math.min(4000, 800 + discoveryQueue.length * 5);
+    setTimeout(function(){loader.hide();},dismissDelay);
+    initialLoad=false;
+  }
 }
 
 function render(graph){

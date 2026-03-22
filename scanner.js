@@ -66,7 +66,30 @@ function extractSnippets(content) {
   return snippets;
 }
 
-async function parseSessionFile(filePath, onDiscover) {
+// Extract meaningful prose from assistant text — explanations, summaries, decisions
+function extractResponseText(content) {
+  const lines = [];
+  if (!Array.isArray(content)) return lines;
+  for (const block of content) {
+    if (block.type !== "text" || typeof block.text !== "string") continue;
+    for (const line of block.text.split("\n")) {
+      const t = line.trim();
+      // Skip code, bullets, headers, empty, markdown noise
+      if (t.length < 20 || t.length > 150) continue;
+      if (/^[`#*\-|>![\d]/.test(t)) continue;
+      if (/^(```|---|===|\+\+\+)/.test(t)) continue;
+      // Skip lines that are mostly code-like
+      if (/[{}();=]/.test(t) && (t.match(/[{}();=]/g) || []).length > 3) continue;
+      // Keep lines that read like natural language
+      if (/[a-z].*\s+[a-z]/i.test(t) && t.split(/\s+/).length >= 4) {
+        lines.push(t);
+      }
+    }
+  }
+  return lines;
+}
+
+async function parseSessionFile(filePath, discoveries) {
   const session = {
     id: path.basename(filePath, ".jsonl"),
     project: null,
@@ -81,6 +104,10 @@ async function parseSessionFile(filePath, onDiscover) {
     fileInteractions: [], // {file, action, tool, timestamp}
     userMessages: [], // {text, timestamp} — for search
   };
+
+  const emit = discoveries
+    ? (d) => discoveries.push(d)
+    : null;
 
   const stream = fs.createReadStream(filePath, { encoding: "utf8" });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -112,10 +139,15 @@ async function parseSessionFile(filePath, onDiscover) {
     // Session title
     if (entry.type === "ai-title") {
       const content = entry.message?.content;
-      if (typeof content === "string") session.title = content;
+      let titleText = null;
+      if (typeof content === "string") titleText = content;
       else if (Array.isArray(content)) {
         const textBlock = content.find((b) => b.type === "text");
-        if (textBlock) session.title = textBlock.text;
+        if (textBlock) titleText = textBlock.text;
+      }
+      if (titleText) {
+        session.title = titleText;
+        if (emit) emit({ type: "title", value: titleText, ts, sessionId: session.id });
       }
     }
 
@@ -135,7 +167,25 @@ async function parseSessionFile(filePath, onDiscover) {
       }
     }
 
-    // Extract tool uses
+    // Extract user prompts
+    if (entry.type === "user" && emit) {
+      const ucontent = entry.message?.content;
+      let utext = "";
+      if (typeof ucontent === "string") utext = ucontent;
+      else if (Array.isArray(ucontent)) {
+        utext = ucontent.filter(b => b.type === "text").map(b => b.text).join(" ");
+      }
+      utext = utext.replace(/<[^>]*>[^<]*<\/[^>]*>/g, "").replace(/<[^>]+>/g, "").trim();
+      if (utext.length > 10 && utext.length < 300 &&
+          !utext.startsWith("The user opened") &&
+          !utext.startsWith("Note:") &&
+          !/^(system|reminder|context)/i.test(utext)) {
+        const display = utext.length > 80 ? utext.slice(0, 77) + "..." : utext;
+        emit({ type: "prompt", value: display, ts, sessionId: session.id });
+      }
+    }
+
+    // Extract tool uses + assistant content
     if (entry.type === "assistant" && entry.message?.content) {
       const content = entry.message.content;
       if (!Array.isArray(content)) continue;
@@ -146,73 +196,50 @@ async function parseSessionFile(filePath, onDiscover) {
         const toolName = block.name;
         const input = block.input || {};
 
-        session.toolCalls.push({
-          tool: toolName,
-          timestamp: ts,
-        });
+        session.toolCalls.push({ tool: toolName, timestamp: ts });
 
-        // Extract file paths from known file tools
+        // File paths
         const extractor = FILE_TOOLS[toolName];
         if (!extractor) continue;
-
         const paths = extractor(input);
         for (const fp of paths) {
           if (!fp) continue;
           session.fileInteractions.push({
-            file: fp,
-            action: ACTION_TYPE[toolName] || "read",
-            tool: toolName,
-            timestamp: ts,
+            file: fp, action: ACTION_TYPE[toolName] || "read",
+            tool: toolName, timestamp: ts,
           });
-          if (onDiscover) onDiscover({ type: "file", value: fp, tool: toolName });
+          if (emit) emit({ type: "file", value: fp, tool: toolName, ts, sessionId: session.id });
         }
       }
 
-      // Extract code written via Edit/Write tools
-      if (onDiscover) {
+      if (emit) {
+        // Code written via Edit/Write
         for (const block of content) {
           if (block.type !== "tool_use") continue;
           const inp = block.input || {};
-
-          // Code being written — Edit new_string or Write content
           const codeText = inp.new_string || inp.content;
           if ((block.name === "Edit" || block.name === "Write") && codeText) {
             const codeLines = codeText.split("\n");
             for (const cl of codeLines) {
               const t = cl.trim();
               if (t.length > 12 && t.length < 120 && !/^\s*$/.test(t) && !/^[/*#\-=]+$/.test(t)) {
-                onDiscover({ type: "code", value: t });
+                emit({ type: "code", value: t, ts, sessionId: session.id });
               }
             }
           }
         }
 
-        // Also extract from assistant text (existing snippet logic)
+        // Assistant response text — explanations, decisions
+        const responseLines = extractResponseText(content);
+        for (const rl of responseLines.slice(0, 5)) {
+          emit({ type: "response", value: rl, ts, sessionId: session.id });
+        }
+
+        // Code snippets from assistant text
         const snippets = extractSnippets(content);
         for (const s of snippets.slice(0, 3)) {
-          onDiscover({ type: "snippet", value: s });
+          emit({ type: "snippet", value: s, ts, sessionId: session.id });
         }
-      }
-    }
-
-    // Extract user prompts
-    if (entry.type === "user" && onDiscover) {
-      const ucontent = entry.message?.content;
-      let utext = "";
-      if (typeof ucontent === "string") utext = ucontent;
-      else if (Array.isArray(ucontent)) {
-        utext = ucontent.filter(b => b.type === "text").map(b => b.text).join(" ");
-      }
-      // Strip system/IDE tags and their content
-      utext = utext.replace(/<[^>]*>[^<]*<\/[^>]*>/g, "").replace(/<[^>]+>/g, "").trim();
-      // Skip if it looks like a system message
-      if (utext.length > 10 && utext.length < 300 &&
-          !utext.startsWith("The user opened") &&
-          !utext.startsWith("Note:") &&
-          !/^(system|reminder|context)/i.test(utext)) {
-        // Send the whole prompt if short, or first meaningful sentence
-        const display = utext.length > 80 ? utext.slice(0, 77) + "..." : utext;
-        onDiscover({ type: "prompt", value: display });
       }
     }
   }
@@ -232,7 +259,7 @@ async function scanAllSessions(onProgress) {
 
   if (!fs.existsSync(PROJECTS_DIR)) {
     console.error("No projects directory found at", PROJECTS_DIR);
-    return { projects, sessions: [], graph: { nodes: [], edges: [] } };
+    return { projects, sessions: [], graph: { nodes: [], edges: [] }, discoveries: [] };
   }
 
   const projectDirs = fs
@@ -251,6 +278,7 @@ async function scanAllSessions(onProgress) {
   }
 
   const allSessions = [];
+  const discoveries = onProgress ? [] : null;
 
   for (const projDir of projectDirs) {
     const projPath = path.join(PROJECTS_DIR, projDir);
@@ -264,7 +292,7 @@ async function scanAllSessions(onProgress) {
     for (const jsonlFile of jsonlFiles) {
       const fullPath = path.join(projPath, jsonlFile);
       try {
-        const session = await parseSessionFile(fullPath, onProgress);
+        const session = await parseSessionFile(fullPath, discoveries);
         session.project = projDir;
         projSessions.push(session);
       } catch (err) {
@@ -302,7 +330,16 @@ async function scanAllSessions(onProgress) {
   // Build graph
   const graph = buildGraph(allSessions);
 
-  return { projects, sessions: allSessions, graph };
+  // Sort discoveries reverse-chronologically (newest first) for time-travel flythrough
+  if (discoveries) {
+    discoveries.sort((a, b) => {
+      const ta = a.ts ? new Date(a.ts).getTime() : 0;
+      const tb = b.ts ? new Date(b.ts).getTime() : 0;
+      return tb - ta; // newest first
+    });
+  }
+
+  return { projects, sessions: allSessions, graph, discoveries: discoveries || [] };
 }
 
 function buildGraph(sessions) {

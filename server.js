@@ -37,33 +37,42 @@ app.get("/api/scan-stream", async (req, res) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  // If cached, just send a burst of what we already have and finish fast
+  // If cached, stream discoveries from cache in reverse-chrono order
   const now = Date.now();
   if (cachedData && now - cacheTime < CACHE_TTL) {
     send("progress", { pct: 100, done: 0, total: 0 });
+    // Stream a sample of cached discoveries (already sorted newest-first)
+    const sample = cachedData.discoveries.slice(0, 800);
+    send("discoveries", { items: sample });
     send("done", { nodes: cachedData.graph.nodes.length, edges: cachedData.graph.edges.length });
     res.end();
     return;
   }
 
-  // Throttle per type so we get a good mix of everything
-  const lastSendByType = {};
-  const THROTTLE_MS = 25; // ~40 events/sec total
-
+  // Phase 1: progress events during scan
   cachedData = await scanAllSessions((evt) => {
     if (closed) return;
-    const n = Date.now();
     if (evt.type === "progress") {
       send("progress", evt);
-    } else {
-      const last = lastSendByType[evt.type] || 0;
-      if (n - last > THROTTLE_MS) {
-        send("discovery", evt);
-        lastSendByType[evt.type] = n;
-      }
     }
   });
   cacheTime = Date.now();
+
+  if (closed) return;
+
+  // Phase 2: stream discoveries reverse-chronologically (newest first = time travel)
+  // Thin out to ~800 items max, keeping a good mix of types
+  const disc = cachedData.discoveries;
+  const budget = { prompt: 200, code: 200, response: 150, file: 100, snippet: 80, title: 50 };
+  const counts = {};
+  const selected = [];
+  for (const d of disc) {
+    const limit = budget[d.type] || 50;
+    counts[d.type] = (counts[d.type] || 0) + 1;
+    if (counts[d.type] <= limit) selected.push(d);
+  }
+
+  send("discoveries", { items: selected });
 
   send("done", {
     nodes: cachedData.graph.nodes.length,
