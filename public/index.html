@@ -70,6 +70,24 @@
     .sr-item .sr-text { color: #aaa; font-size: 11px; line-height: 1.4; }
     .sr-item .sr-text mark { background: rgba(123,123,255,0.25); color: #ccc; border-radius: 2px; padding: 0 2px; }
     .sr-item .sr-file { color: #8a8; font-size: 11px; }
+    .sr-item .sr-full-msg { display: none; margin-top: 6px; padding: 6px 8px; background: #0a0a14; border-radius: 4px; border-left: 2px solid #4a4a8a; color: #bbb; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; }
+    .sr-item.expanded .sr-full-msg { display: block; }
+    .sr-item .sr-expand { color: #5a5aaa; font-size: 10px; cursor: pointer; margin-top: 4px; }
+    .sr-item .sr-expand:hover { color: #8a8aff; }
+    .transcript-panel { padding: 10px; }
+    .transcript-msg { margin-bottom: 10px; padding: 8px; border-radius: 6px; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+    .transcript-msg.user { background: #1a1a2e; border-left: 3px solid #e8a838; }
+    .transcript-msg.assistant { background: #12121c; border-left: 3px solid #4a4a8a; }
+    .transcript-msg .msg-role { font-size: 10px; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+    .transcript-msg.user .msg-role { color: #e8a838; }
+    .transcript-msg.assistant .msg-role { color: #7b7bff; }
+    .transcript-msg .msg-time { color: #555; font-size: 9px; float: right; }
+    .transcript-msg .msg-tools { color: #5a8a5a; font-size: 10px; margin-top: 4px; }
+    .transcript-msg .msg-text { color: #bbb; }
+    .transcript-btn { background: #1a1a2e; border: 1px solid #3a3a5a; color: #8a8aff; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 11px; margin-top: 8px; transition: all 0.15s; }
+    .transcript-btn:hover { background: #2a2a4a; border-color: #5a5a8a; }
+    .sg-type.today { background: #2a4a2a; color: #6c6; }
+    .sg-type.topic { background: #3a2a1a; color: #e8a838; }
     .sr-type-badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px; margin-right: 4px; }
     .sr-type-badge.msg { background: #1a1a3a; color: #8888cc; }
     .sr-type-badge.file { background: #1a2a1a; color: #88aa88; }
@@ -170,39 +188,68 @@
       background: rgba(8, 8, 16, 0.92);
       border-left: 1px solid #2a2a5a;
       display: none; flex-direction: column;
-      overflow-y: auto;
     }
     #timeline.active { display: flex; }
     #timeline .tl-header {
-      padding: 16px; font-size: 11px; color: #666;
+      padding: 14px 16px; font-size: 11px; color: #666;
       text-transform: uppercase; letter-spacing: 1px;
       border-bottom: 1px solid #1a1a2a;
+      flex-shrink: 0;
     }
     #timeline .tl-entries {
-      flex: 1; overflow-y: auto; padding: 8px 12px;
-    }
-    #timeline .tl-entry {
-      padding: 8px 10px; margin-bottom: 4px;
-      border-left: 3px solid #2a2a4a;
-      border-radius: 0 4px 4px 0;
-      cursor: pointer; transition: all 0.15s;
-      position: relative;
-    }
-    #timeline .tl-entry:hover { background: rgba(123,123,255,0.08); border-left-color: #5a5a8a; }
-    #timeline .tl-entry.current { background: rgba(123,123,255,0.12); border-left-color: #7b7bff; }
-    #timeline .tl-entry .tl-date {
-      font-size: 13px; color: #aaa; font-weight: 600;
-    }
-    #timeline .tl-entry .tl-rel {
-      font-size: 11px; color: #555; margin-top: 2px;
-    }
-    #timeline .tl-entry .tl-count {
-      font-size: 10px; color: #444; margin-top: 2px;
+      flex: 1; overflow-y: auto; padding: 6px 0;
     }
     #timeline .tl-now {
-      padding: 8px 10px; margin-bottom: 4px;
+      padding: 8px 14px; margin: 0 0 2px;
       border-left: 3px solid #ff9b4a;
-      color: #ff9b4a; font-size: 12px; font-weight: 600;
+      color: #ff9b4a; font-size: 13px; font-weight: 600;
+      cursor: pointer;
+    }
+    #timeline .tl-now:hover { background: rgba(255,155,74,0.08); }
+    /* Day row */
+    #timeline .tl-day {
+      cursor: pointer; padding: 8px 14px;
+      border-left: 3px solid #2a2a4a;
+      transition: all 0.15s; user-select: none;
+    }
+    #timeline .tl-day:hover { background: rgba(123,123,255,0.06); border-left-color: #5a5a8a; }
+    #timeline .tl-day.current { border-left-color: #7b7bff; background: rgba(123,123,255,0.08); }
+    #timeline .tl-day .tl-day-label {
+      font-size: 14px; color: #bbb; font-weight: 600;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    #timeline .tl-day .tl-day-meta {
+      font-size: 11px; color: #555; margin-top: 2px;
+      display: flex; gap: 8px;
+    }
+    #timeline .tl-day .tl-day-bar {
+      height: 4px; background: #15151f; border-radius: 2px; margin-top: 6px; overflow: hidden;
+    }
+    #timeline .tl-day .tl-day-bar-fill {
+      height: 100%; border-radius: 2px;
+      background: linear-gradient(90deg, #3a3a88, #7b7bff);
+    }
+    #timeline .tl-day .tl-arrow {
+      font-size: 10px; color: #555; transition: transform 0.2s;
+    }
+    #timeline .tl-day.open .tl-arrow { transform: rotate(90deg); }
+    /* Hour rows (nested under day) */
+    #timeline .tl-hours {
+      max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+    }
+    #timeline .tl-day.open + .tl-hours { max-height: 600px; }
+    #timeline .tl-hour {
+      padding: 5px 14px 5px 26px;
+      border-left: 3px solid #1a1a2a;
+      cursor: pointer; transition: all 0.15s;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; color: #888;
+    }
+    #timeline .tl-hour:hover { background: rgba(123,123,255,0.06); color: #bbb; }
+    #timeline .tl-hour.current { border-left-color: #7b7bff; color: #bbbbff; background: rgba(123,123,255,0.1); }
+    #timeline .tl-hour .tl-hour-count {
+      font-size: 10px; color: #555; background: #15151f;
+      padding: 1px 6px; border-radius: 8px;
     }
 
     /* ─── Loader: 3D code flythrough ─── */
@@ -218,10 +265,25 @@
     #loader-hud {
       position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%);
       display: flex; flex-direction: column; align-items: center; z-index: 2;
-      pointer-events: none;
       padding: 40px 60px;
-      background: radial-gradient(ellipse at center, rgba(5,5,8,0.92) 0%, rgba(5,5,8,0.7) 60%, transparent 100%);
+      background: rgba(5,5,12,0.95);
+      border: 1px solid #2a2a5a;
       border-radius: 16px;
+      box-shadow: 0 0 80px rgba(0,0,0,0.8);
+    }
+    #loader-hud .hud-search {
+      width: 100%; margin-top: 16px; position: relative;
+    }
+    #loader-hud .hud-search input {
+      width: 100%; background: #12121f; border: 1px solid #3a3a5a;
+      color: #ddd; padding: 8px 12px 8px 32px; border-radius: 6px;
+      font-size: 14px; font-family: inherit; outline: none;
+    }
+    #loader-hud .hud-search input:focus { border-color: #7b7bff; box-shadow: 0 0 12px rgba(123,123,255,0.2); }
+    #loader-hud .hud-search input::placeholder { color: #555; }
+    #loader-hud .hud-search .hud-search-icon {
+      position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+      color: #555; font-size: 14px; pointer-events: none;
     }
     #loader-hud .title {
       font-size: 36px; color: #9b9bff; font-weight: 600;
@@ -380,6 +442,7 @@
     </div>
     <button id="patternsBtn" title="Repeated commands" onclick="showPatterns()">&#x21BB;</button>
     <button id="helpBtn" title="Tour" onclick="tour.start()">?</button>
+    <button id="backTo3dBtn" title="Back to 3D flythrough" onclick="showFlythrough()" style="background:none;border:1px solid #333;color:#666;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;display:none;">&#9664; 3D</button>
   </div>
 
   <div id="loader">
@@ -391,11 +454,15 @@
       <div class="status" id="loaderStatus">initializing...</div>
       <div class="counter" id="loaderCounter"></div>
       <div class="legend">
-        <span><div class="dot" style="background:#ff9b4a"></div><span style="color:#5a4a30">prompts</span></span>
-        <span><div class="dot" style="background:#4ade80"></div><span style="color:#2a4a30">code</span></span>
-        <span><div class="dot" style="background:#6bb8e0"></div><span style="color:#2a3a4a">responses</span></span>
-        <span><div class="dot" style="background:#4a8bcc"></div><span style="color:#2a3a4a">files</span></span>
-        <span><div class="dot" style="background:#ffd700"></div><span style="color:#4a4a30">titles</span></span>
+        <span><div class="dot" style="background:#ffaa55"></div><span style="color:#cc8844">> prompts</span></span>
+        <span><div class="dot" style="background:#55ff88"></div><span style="color:#44cc66">| code</span></span>
+        <span><div class="dot" style="background:#77ccff"></div><span style="color:#5599cc">&larr; responses</span></span>
+        <span><div class="dot" style="background:#55aaee"></div><span style="color:#4488bb">files</span></span>
+        <span><div class="dot" style="background:#ffdd44"></div><span style="color:#ccaa33">titles</span></span>
+      </div>
+      <div class="hud-search">
+        <span class="hud-search-icon">&#x1F50D;</span>
+        <input type="text" id="hudSearchInput" placeholder="search prompts, code, files..." autocomplete="off">
       </div>
     </div>
   </div>
@@ -579,12 +646,21 @@ class Particle {
       const big = item.type === "prompt" || item.type === "title" || item.type === "file";
       this.size = big ? 22 + Math.random() * 8 : 16 + Math.random() * 6;
       this.bright = true;
+      // Store formatted timestamp for display
+      if (item.ts) {
+        const d = new Date(item.ts);
+        this.timeLabel = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) +
+                         " " + d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      } else {
+        this.timeLabel = null;
+      }
     } else {
       this.text = AMBIENT[Math.floor(Math.random() * AMBIENT.length)];
       this.palette = PALETTES.dim;
       this.size = 12 + Math.random() * 5;
       this.bright = false;
       this.kind = "ambient";
+      this.timeLabel = null;
     }
 
     this.color = this.palette[Math.floor(Math.random() * this.palette.length)];
@@ -605,8 +681,10 @@ class Particle {
   }
 
   update(dt) {
+    // When paused, slow particles to a gentle drift instead of full stop
+    if (movieStarted && !moviePlaying) dt *= 0.05;
     // Accelerate as loading progresses: 1x at 0%, up to 3x at 100%
-    const accel = 1 + (loadProgress / 100) * 2;
+    const accel = (1 + (loadProgress / 100) * 2) * (movieStarted ? movieSpeed : 1);
     this.z += this.vz * accel * dt;
     this.x += this.vx * accel * dt;
     this.y += this.vy * accel * dt;
@@ -713,6 +791,15 @@ class Particle {
     }
 
     c.fillText(this.text, 0, 0);
+
+    // Timestamp below text — only when close enough to read
+    if (this.timeLabel && this.bright && this.z < 300 && fs > 10) {
+      const tsFs = Math.max(8, fs * 0.55);
+      c.font = `${tsFs}px 'SF Mono','Fira Code',monospace`;
+      c.fillStyle = "#666688";
+      c.globalAlpha = alpha * 0.5;
+      c.fillText(this.timeLabel, 0, fs * 0.5);
+    }
 
     c.restore();
   }
@@ -1027,43 +1114,91 @@ function initMovieControls() {
   rebuildTimeline();
 }
 
+function rebuildTimelineFrom(items) {
+  _rebuildTimelineImpl(items);
+}
 function rebuildTimeline() {
-  // Group discoveries by hour
-  const groups = new Map();
-  for (const d of allDiscoveries) {
+  _rebuildTimelineImpl(allDiscoveries);
+}
+function _rebuildTimelineImpl(sourceItems) {
+  // Group discoveries: day → hours
+  const days = new Map(); // dayKey → { hours: Map<hourKey, {count, firstIndex}>, totalCount, date }
+  let maxDayCount = 0;
+
+  for (let i = 0; i < sourceItems.length; i++) {
+    const d = sourceItems[i];
     if (!d.ts) continue;
     const date = new Date(d.ts);
-    const hourKey = date.toLocaleDateString() + " " + date.getHours() + ":00";
-    if (!groups.has(hourKey)) {
-      groups.set(hourKey, {
-        key: hourKey,
-        date: date,
-        label: date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) +
-               " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        rel: relTime(date),
-        count: 0,
-        index: allDiscoveries.indexOf(
-          allDiscoveries.find(dd => dd.ts && new Date(dd.ts).toLocaleDateString() + " " + new Date(dd.ts).getHours() + ":00" === hourKey)
-        ),
-      });
+    const dayKey = date.toLocaleDateString();
+    const hourKey = date.getHours();
+
+    if (!days.has(dayKey)) {
+      days.set(dayKey, { date, hours: new Map(), totalCount: 0, firstIndex: i });
     }
-    groups.get(hourKey).count++;
+    const day = days.get(dayKey);
+    day.totalCount++;
+    if (!day.hours.has(hourKey)) {
+      day.hours.set(hourKey, { count: 0, firstIndex: i, date });
+    }
+    day.hours.get(hourKey).count++;
+    if (day.totalCount > maxDayCount) maxDayCount = day.totalCount;
   }
 
-  timelineSlots = Array.from(groups.values());
-  // Already sorted newest-first since allDiscoveries is newest-first
+  // Sort days newest-first
+  timelineSlots = Array.from(days.values()).sort((a, b) => b.date.getTime() - a.date.getTime());
 
-  // Render timeline
-  tlEntries.innerHTML = '<div class="tl-now">&#9679; NOW</div>';
-  for (const slot of timelineSlots) {
-    const el = document.createElement("div");
-    el.className = "tl-entry";
-    el.dataset.index = slot.index;
-    el.innerHTML = '<div class="tl-date">' + slot.label + '</div>' +
-                   '<div class="tl-rel">' + slot.rel + '</div>' +
-                   '<div class="tl-count">' + slot.count + ' items</div>';
-    el.onclick = () => scrubTo(slot.index / Math.max(1, allDiscoveries.length));
-    tlEntries.appendChild(el);
+  // Render
+  tlEntries.innerHTML = '';
+  // NOW marker
+  const nowEl = document.createElement("div");
+  nowEl.className = "tl-now";
+  nowEl.innerHTML = "&#9679; NOW";
+  nowEl.onclick = () => scrubTo(0);
+  tlEntries.appendChild(nowEl);
+
+  for (const day of timelineSlots) {
+    const dayLabel = day.date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+    const dayRel = relTime(day.date);
+    const barPct = maxDayCount > 0 ? Math.max(4, (day.totalCount / maxDayCount) * 100) : 4;
+
+    // Day row
+    const dayEl = document.createElement("div");
+    dayEl.className = "tl-day";
+    dayEl.dataset.firstIndex = day.firstIndex;
+    dayEl.dataset.dayKey = day.date.toLocaleDateString();
+    dayEl.innerHTML =
+      '<div class="tl-day-label"><span>' + dayLabel + '</span><span class="tl-arrow">&#9654;</span></div>' +
+      '<div class="tl-day-meta"><span>' + dayRel + '</span><span>' + day.totalCount + ' items</span></div>' +
+      '<div class="tl-day-bar"><div class="tl-day-bar-fill" style="width:' + barPct + '%"></div></div>';
+    dayEl.onclick = (e) => {
+      // Toggle open
+      dayEl.classList.toggle("open");
+      // If not just toggling, also scrub
+      if (!e.target.closest(".tl-arrow")) {
+        scrubTo(day.firstIndex / Math.max(1, sourceItems.length));
+      }
+    };
+    tlEntries.appendChild(dayEl);
+
+    // Hours container (collapsible)
+    const hoursEl = document.createElement("div");
+    hoursEl.className = "tl-hours";
+    // Sort hours descending (newest first)
+    const sortedHours = Array.from(day.hours.entries()).sort((a, b) => b[0] - a[0]);
+    for (const [hourNum, hourData] of sortedHours) {
+      const hEl = document.createElement("div");
+      hEl.className = "tl-hour";
+      const hLabel = hourData.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      hEl.dataset.hourKey = hourNum;
+      hEl.dataset.dayKey = day.date.toLocaleDateString();
+      hEl.innerHTML = '<span>' + hLabel + '</span><span class="tl-hour-count">' + hourData.count + '</span>';
+      hEl.onclick = (e) => {
+        e.stopPropagation();
+        scrubTo(hourData.firstIndex / Math.max(1, sourceItems.length));
+      };
+      hoursEl.appendChild(hEl);
+    }
+    tlEntries.appendChild(hoursEl);
   }
 }
 
@@ -1086,11 +1221,24 @@ function updateMoviePosition() {
     movieTime.style.color = "#ff9b4a";
   }
 
-  // Highlight current timeline entry
-  const entries = tlEntries.querySelectorAll(".tl-entry");
-  for (const e of entries) {
-    const eIdx = parseInt(e.dataset.index);
-    e.classList.toggle("current", Math.abs(eIdx - idx) < allDiscoveries.length / timelineSlots.length);
+  // Highlight current day + hour in timeline
+  const currentItem = allDiscoveries[idx];
+  const currentDayKey = currentItem && currentItem.ts ? new Date(currentItem.ts).toLocaleDateString() : null;
+  const currentHourKey = currentItem && currentItem.ts ? String(new Date(currentItem.ts).getHours()) : null;
+
+  const dayEls = tlEntries.querySelectorAll(".tl-day");
+  for (const de of dayEls) {
+    const isCurrent = de.dataset.dayKey === currentDayKey;
+    de.classList.toggle("current", isCurrent);
+    if (isCurrent && !de.classList.contains("open")) de.classList.add("open");
+    // Scroll current day into view
+    if (isCurrent) de.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  const hourEls = tlEntries.querySelectorAll(".tl-hour");
+  for (const he of hourEls) {
+    const isCurrent = he.dataset.dayKey === currentDayKey && he.dataset.hourKey === currentHourKey;
+    he.classList.toggle("current", isCurrent);
   }
 }
 
@@ -1136,7 +1284,49 @@ document.getElementById("movieExit").onclick = () => {
   movieBar.classList.remove("active");
   timeline.classList.remove("active");
   loader.hide();
+  document.getElementById("backTo3dBtn").style.display = "inline-flex";
 };
+
+// Back to 3D flythrough from graph
+function showFlythrough() {
+  const loaderEl = document.getElementById("loader");
+  loaderEl.style.display = "";
+  loaderEl.classList.remove("done");
+  loaderRunning = true;
+  lt = performance.now();
+  requestAnimationFrame(animateLoader);
+  movieBar.classList.add("active");
+  timeline.classList.add("active");
+  document.getElementById("backTo3dBtn").style.display = "none";
+}
+
+// HUD search — filters particles and timeline to matching items
+let hudSearchQuery = "";
+document.getElementById("hudSearchInput").addEventListener("input", (e) => {
+  hudSearchQuery = e.target.value.trim().toLowerCase();
+  if (!hudSearchQuery) {
+    // Reset — show everything
+    filteredDiscoveries = null;
+    rebuildTimeline();
+    return;
+  }
+  // Filter allDiscoveries to matching items
+  filteredDiscoveries = allDiscoveries.filter(d => {
+    const val = (d.value || "").toLowerCase();
+    return val.includes(hudSearchQuery);
+  });
+  // Rebuild timeline from filtered set
+  rebuildTimelineFrom(filteredDiscoveries);
+  // Reset the queue with filtered items
+  discoveryQueue.length = 0;
+  discoveredItems.length = 0;
+  timePlanes.length = 0;
+  drainQueue._lastPlaneKey = "";
+  discoveryQueue.push(...filteredDiscoveries);
+  moviePosition = 0;
+  updateMoviePosition();
+});
+let filteredDiscoveries = null;
 
 // Scrubber drag
 let scrubbing = false;
@@ -1167,11 +1357,18 @@ function updateMovieFromDrain() {
 
 // ── Search ──
 let searchTO=null;
-const SUGGESTIONS=[
+let SUGGESTIONS=[
   {type:"msg",text:"fix the bug"},{type:"msg",text:"refactor"},{type:"msg",text:"add tests"},
   {type:"file",text:"index.html"},{type:"file",text:"package.json"},{type:"msg",text:"deploy"},
-  {type:"msg",text:"error"},{type:"msg",text:"migration"},{type:"file",text:".env"},{type:"msg",text:"review"},
 ];
+// Load dynamic suggestions from the API (called after scan completes)
+function loadSuggestions(){
+  fetch("/api/suggestions").then(r=>r.json()).then(data=>{
+    if(data.suggestions&&data.suggestions.length){
+      SUGGESTIONS=data.suggestions.map(s=>({type:s.type,text:s.text,desc:s.description}));
+    }
+  }).catch(()=>{});
+}
 
 document.getElementById("searchInput").addEventListener("input",e=>{
   const q=e.target.value.trim();clearTimeout(searchTO);
@@ -1214,6 +1411,33 @@ document.addEventListener("keydown",function(e){
     currentTimeRange=timeKeys[e.key];loadGraph();return;
   }
 
+  // Left/Right arrows — step through time periods
+  var timeOrder=["all","month","week","today","1h"];
+  if(e.key==="ArrowRight"||e.key==="ArrowLeft"){
+    e.preventDefault();
+    var ci=timeOrder.indexOf(currentTimeRange);
+    if(ci===-1)ci=0;
+    if(e.key==="ArrowRight")ci=Math.min(ci+1,timeOrder.length-1);
+    else ci=Math.max(ci-1,0);
+    currentTimeRange=timeOrder[ci];
+    document.querySelectorAll(".time-btn").forEach(function(b){b.classList.remove("active");if(b.dataset.range===currentTimeRange)b.classList.add("active");});
+    loadGraph();return;
+  }
+
+  // Space — play/pause auto-cycle through time periods
+  if(e.key===" "){
+    e.preventDefault();
+    if(window._timeCycleInterval){clearInterval(window._timeCycleInterval);window._timeCycleInterval=null;return;}
+    window._timeCycleInterval=setInterval(function(){
+      var ci=timeOrder.indexOf(currentTimeRange);
+      ci=(ci+1)%timeOrder.length;
+      currentTimeRange=timeOrder[ci];
+      document.querySelectorAll(".time-btn").forEach(function(b){b.classList.remove("active");if(b.dataset.range===currentTimeRange)b.classList.add("active");});
+      loadGraph();
+    },2000);
+    return;
+  }
+
   // P — patterns
   if(e.key==="p"||e.key==="P"){showPatterns();return;}
 
@@ -1226,7 +1450,19 @@ document.addEventListener("keydown",function(e){
 
 function showSuggestions(){
   const el=document.getElementById("searchSuggestions");
-  el.innerHTML='<div class="suggestion-section"><div class="suggestion-section-title">try searching for</div>'+SUGGESTIONS.map(q=>'<div class="suggestion-item" onclick="document.getElementById(\'searchInput\').value=\''+q.text+'\';runSearch(\''+q.text+'\');"><span class="sg-type">'+q.type+'</span>'+q.text+'</div>').join("")+'</div>';
+  // Group by type
+  const groups={};
+  for(const q of SUGGESTIONS){
+    const g=q.type==="today"?"today's topics":q.type==="topic"?"frequent topics":q.type==="file"?"hot files":"suggestions";
+    if(!groups[g])groups[g]=[];
+    groups[g].push(q);
+  }
+  let html="";
+  for(const [label,items] of Object.entries(groups)){
+    html+='<div class="suggestion-section"><div class="suggestion-section-title">'+label+'</div>'+
+      items.map(q=>'<div class="suggestion-item" onclick="document.getElementById(\'searchInput\').value=\''+q.text+'\';runSearch(\''+q.text+'\');"><span class="sg-type '+q.type+'">'+q.type+'</span>'+q.text+(q.desc?'<span style="color:#555;font-size:9px;margin-left:6px">'+q.desc+'</span>':'')+'</div>').join("")+'</div>';
+  }
+  el.innerHTML=html;
   el.classList.add("open");
 }
 
@@ -1241,13 +1477,46 @@ function showSearchResults(query,data){
   document.getElementById("searchResultsContent").innerHTML=
     '<div class="sr-header"><h2>Search: "'+query+'"</h2><span class="sr-count">'+data.total+' result'+(data.total!==1?"s":"")+'</span></div>'+
     (!data.results.length?'<div style="color:#666;padding:20px;text-align:center">No results</div>':"")+
-    data.results.map(function(r){
-      if(r.type==="message") return '<div class="sr-item" onclick="highlightNode(\'session:'+r.sessionId+'\')"><div class="sr-meta"><span><span class="sr-type-badge msg">msg</span><span class="sr-session">'+r.sessionTitle+'</span></span><span class="sr-time">'+fmtTime(r.timestamp)+'</span></div><div style="color:#555;font-size:10px">'+(r.project||"")+'</div><div class="sr-text">'+hl(r.text,query)+'</div></div>';
+    data.results.map(function(r,i){
+      if(r.type==="message") {
+        var preview=r.text.length>120?r.text.slice(0,120)+"...":r.text;
+        var full=r.text.replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        return '<div class="sr-item" id="sr-'+i+'"><div class="sr-meta" onclick="highlightNode(\'session:'+r.sessionId+'\')"><span><span class="sr-type-badge msg">msg</span><span class="sr-session">'+r.sessionTitle+'</span></span><span class="sr-time">'+fmtTime(r.timestamp)+'</span></div><div style="color:#555;font-size:10px">'+(r.project||"")+'</div><div class="sr-text">'+hl(preview,query)+'</div>'+(r.text.length>120?'<div class="sr-expand" onclick="toggleMsg('+i+')">show full message</div>':'')+
+        '<div class="sr-full-msg">'+full+'</div>'+
+        '<div class="sr-expand" onclick="loadTranscript(\''+r.sessionId+'\',\''+r.sessionTitle.replace(/'/g,"\\'")+'\')">view session transcript</div></div>';
+      }
       return '<div class="sr-item" onclick="highlightNode(\'file:'+r.file+'\')"><div class="sr-meta"><span><span class="sr-type-badge file">file</span><span class="sr-session">'+r.sessionTitle+'</span></span><span class="sr-time">'+fmtTime(r.timestamp)+'</span></div><div class="sr-file">'+r.file+'</div><div style="font-size:10px;color:#555">'+r.action+' in '+(r.project||"")+'</div></div>';
     }).join("");
 }
 
 function closeSearchResults(){document.getElementById("searchResults").classList.remove("open");}
+
+function toggleMsg(i){
+  var el=document.getElementById("sr-"+i);
+  if(el)el.classList.toggle("expanded");
+  var btn=el.querySelector(".sr-expand");
+  if(btn&&btn.textContent==="show full message")btn.textContent="hide full message";
+  else if(btn&&btn.textContent==="hide full message")btn.textContent="show full message";
+}
+
+async function loadTranscript(sessionId,title){
+  var panel=document.getElementById("detail"),content=document.getElementById("detailContent");
+  panel.classList.add("open");
+  content.innerHTML='<h2>'+title+'</h2><div style="color:#666;padding:10px">Loading transcript...</div>';
+  try{
+    var data=await fetch("/api/session/"+sessionId+"/transcript").then(r=>r.json());
+    if(data.error){content.innerHTML='<h2>'+title+'</h2><div style="color:#e85b5b">'+data.error+'</div>';return;}
+    var html='<h2>'+title+'</h2><div class="field"><span class="key">project:</span> <span class="val">'+(data.project||"?")+'</span></div><div class="field"><span class="key">messages:</span> <span class="val">'+data.messages.length+'</span></div><div class="transcript-panel">';
+    for(var m of data.messages){
+      html+='<div class="transcript-msg '+m.role+'"><div class="msg-role">'+m.role+'<span class="msg-time">'+fmtTime(m.timestamp)+'</span></div>';
+      if(m.text)html+='<div class="msg-text">'+m.text.replace(/</g,"&lt;").replace(/>/g,"&gt;")+'</div>';
+      if(m.tools&&m.tools.length)html+='<div class="msg-tools">tools: '+m.tools.join(", ")+'</div>';
+      html+='</div>';
+    }
+    html+='</div>';
+    content.innerHTML=html;
+  }catch(e){content.innerHTML='<h2>'+title+'</h2><div style="color:#e85b5b">Error: '+e.message+'</div>';}
+}
 
 function highlightNode(id){
   g.selectAll("circle").attr("opacity",function(d){return d.id===id?1:0.3;});
@@ -1391,6 +1660,7 @@ function showDetail(d,links){
       '<div class="field"><span class="key">messages:</span> <span class="val">'+d.messages+'</span></div>'+
       '<div class="field"><span class="key">tool calls:</span> <span class="val">'+d.toolCalls+'</span></div>'+
       '<div class="field"><span class="key">files touched:</span> <span class="val">'+conn.length+'</span></div>'+
+      '<button class="transcript-btn" onclick="loadTranscript(\''+d.id.replace("session:","")+'\',\''+d.label.replace(/'/g,"\\'")+'\')">View Full Transcript</button>'+
       '<div class="file-list">'+conn.map(function(l){var f=(l.target.id||l.target),fn=f.replace("file:","").split("/").slice(-2).join("/");return'<div class="file-entry"><span class="fname" title="'+f.replace("file:","")+'">'+fn+'</span><span>'+(l.reads?'<span class="badge read">'+l.reads+'R</span>':"")+(l.writes?'<span class="badge write">'+l.writes+'W</span>':"")+'</span></div>';}).join("")+'</div>';
   }else{
     var conn=links.filter(function(l){return(l.target.id||l.target)===d.id;});

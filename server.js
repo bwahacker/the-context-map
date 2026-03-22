@@ -306,6 +306,153 @@ app.get("/api/session/:id", async (req, res) => {
   res.json(session);
 });
 
+// Full message transcript for a session
+app.get("/api/session/:id/transcript", async (req, res) => {
+  try {
+    const data = await getData();
+    const session = data.sessions.find((s) => s.id === req.params.id);
+    if (!session) return res.status(404).json({ error: "not found" });
+
+    // Read the raw JSONL and extract all user + assistant messages in order
+    const fs = require("fs");
+    const path = require("path");
+    const readline = require("readline");
+    const CLAUDE_DIR = path.join(require("os").homedir(), ".claude", "projects");
+    const filePath = path.join(CLAUDE_DIR, session.project, session.id + ".jsonl");
+
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "session file not found" });
+
+    const stream = fs.createReadStream(filePath, { encoding: "utf8" });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    const messages = [];
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      if (entry.type === "user") {
+        const content = entry.message?.content;
+        let text = "";
+        if (typeof content === "string") text = content;
+        else if (Array.isArray(content)) {
+          text = content.filter(b => b.type === "text").map(b => b.text).join("\n");
+        }
+        // Strip system tags
+        text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").replace(/<[^>]+>/g, "").trim();
+        if (text && text.length > 3 && !text.startsWith("Note:") && !text.startsWith("The user opened")) {
+          messages.push({ role: "user", text, timestamp: entry.timestamp });
+        }
+      }
+
+      if (entry.type === "assistant" && entry.message?.content) {
+        const content = entry.message.content;
+        if (!Array.isArray(content)) continue;
+        const textParts = [];
+        const tools = [];
+        for (const block of content) {
+          if (block.type === "text" && block.text) textParts.push(block.text);
+          if (block.type === "tool_use") tools.push(block.name);
+        }
+        const text = textParts.join("\n").trim();
+        if (text || tools.length) {
+          messages.push({
+            role: "assistant",
+            text: text || null,
+            tools: tools.length ? tools : undefined,
+            timestamp: entry.timestamp,
+          });
+        }
+      }
+    }
+
+    res.json({
+      sessionId: session.id,
+      title: session.title,
+      project: session.project,
+      messages,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Auto-generated search suggestions based on actual data
+app.get("/api/suggestions", async (req, res) => {
+  try {
+    const data = await getData();
+    const suggestions = [];
+
+    // Topic clusters: find most common words across user messages (skip stopwords)
+    const stopwords = new Set(["the","a","an","and","or","but","in","on","at","to","for","of","with","by","is","it","this","that","i","we","you","me","my","can","do","did","will","be","have","has","had","not","no","so","if","from","up","out","as","all","just","get","got","make","let","its","are","was","were","been","dont","im","ive","also","would","should","could","what","how","when","where","why","there","here","then","than","them","they","these","those","about","into","over","after","before","need","want","like","use","file","code"]);
+    const wordFreq = new Map();
+    for (const session of data.sessions) {
+      for (const msg of (session.userMessages || [])) {
+        const words = msg.text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/);
+        for (const w of words) {
+          if (w.length < 4 || stopwords.has(w)) continue;
+          wordFreq.set(w, (wordFreq.get(w) || 0) + 1);
+        }
+      }
+    }
+    const topWords = Array.from(wordFreq.entries())
+      .filter(([, c]) => c >= 3)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+    for (const [word, count] of topWords) {
+      suggestions.push({ type: "topic", text: word, count, description: count + " mentions across sessions" });
+    }
+
+    // File hotspots: most-touched files
+    const fileCounts = new Map();
+    for (const session of data.sessions) {
+      const seen = new Set();
+      for (const fi of session.fileInteractions) {
+        if (seen.has(fi.file)) continue;
+        seen.add(fi.file);
+        fileCounts.set(fi.file, (fileCounts.get(fi.file) || 0) + 1);
+      }
+    }
+    const topFiles = Array.from(fileCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6);
+    for (const [file, count] of topFiles) {
+      const name = file.split("/").pop();
+      suggestions.push({ type: "file", text: name, count, description: count + " sessions touched this file" });
+    }
+
+    // Time-based suggestions
+    const now = Date.now();
+    const todayStart = new Date().setHours(0, 0, 0, 0);
+    const todaySessions = data.sessions.filter(s => new Date(s.startTime || 0).getTime() >= todayStart);
+    if (todaySessions.length) {
+      // Extract keywords from today's messages
+      const todayWords = new Map();
+      for (const s of todaySessions) {
+        for (const msg of (s.userMessages || [])) {
+          const words = msg.text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/);
+          for (const w of words) {
+            if (w.length < 4 || stopwords.has(w)) continue;
+            todayWords.set(w, (todayWords.get(w) || 0) + 1);
+          }
+        }
+      }
+      const todayTop = Array.from(todayWords.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3);
+      for (const [word, count] of todayTop) {
+        suggestions.push({ type: "today", text: word, count, description: "mentioned " + count + "x today" });
+      }
+    }
+
+    res.json({ suggestions });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Replay endpoint — returns timestamped events for today (or a given range)
 app.get("/api/replay", async (req, res) => {
   try {
