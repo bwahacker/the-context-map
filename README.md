@@ -1,8 +1,10 @@
 # The Context Map
 
+> **100% local. Your data never leaves your machine. No accounts, no telemetry, no external API calls.**
+
 **See everything Claude Code has ever done for you — as a living, explorable map.**
 
-100% local. Your session data never leaves your machine. No accounts, no telemetry, no external API calls. The server runs on localhost, reads your local `~/.claude/projects/` directory, and that's it.
+The server runs on localhost, reads your local `~/.claude/projects/` directory, and that's it.
 
 The Context Map parses your Claude Code session history and gives you multiple ways to explore it: a force-directed graph of sessions and files, a MIDI-sequencer-style timeline, file-centric and chronological views, full message transcripts with inline diffs, and full-text search across everything.
 
