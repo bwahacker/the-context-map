@@ -1,19 +1,22 @@
 # The Context Map
 
-**See everything Claude Code has ever done for you — as a living, explorable graph.**
+**See everything Claude Code has ever done for you — as a living, explorable map.**
 
-The Context Map scans your local Claude Code session history and renders an interactive force-directed graph of every session and every file it touched. Sessions are blue nodes. Files are green. Lines connect them. Shared files — the ones Claude keeps coming back to across sessions — glow amber and grow larger. The result is a real-time map of your AI-assisted development work.
+100% local. Your session data never leaves your machine. No accounts, no telemetry, no external API calls. The server runs on localhost, reads your local `~/.claude/projects/` directory, and that's it.
 
-## Why this matters
+The Context Map parses your Claude Code session history and gives you multiple ways to explore it: a force-directed graph of sessions and files, a MIDI-sequencer-style timeline, file-centric and chronological views, full message transcripts with inline diffs, and full-text search across everything.
+
+## Why this exists
 
 When you use Claude Code daily across multiple projects, you accumulate hundreds of sessions and thousands of file interactions. That history is valuable, but it's buried in `~/.claude/projects/` as raw JSONL logs. You can't search it, you can't see patterns, and you can't answer basic questions like:
 
-- **What files come up again and again?** The shared-file heatmap shows you which files are the real center of gravity in your work — the ones Claude touches across many sessions. These are your most important files.
-- **What did I work on today?** Time filters (all / month / week / today / 1h) let you slice the graph to any window. The replay controller lets you watch today's activity unfold chronologically.
-- **What do I keep asking for?** The pattern detector finds commands and prompts you type repeatedly — candidates for aliases, scripts, or Stream Deck buttons.
-- **How do my sessions relate?** When two sessions touch the same files, the graph connects them visually. You can see which sessions were part of the same logical effort, even if you didn't think of them that way.
+- **What files come up again and again?** The shared-file heatmap shows your center of gravity — the files Claude touches across many sessions.
+- **What did I work on today?** Time filters let you slice to any window. The sequencer view shows every event in chronological order.
+- **What do I keep asking for?** The pattern detector finds prompts you type repeatedly — candidates for aliases, scripts, or automation.
+- **How do my sessions relate?** When sessions touch the same files, the graph connects them. The file view groups all edits to each file across every session.
+- **What actually changed?** Expand any session in the sequencer to see the full exchange: your prompt, Claude's response, and the exact diffs — inline, in order.
 
-This is your development work made visible. Not the code — the *process*.
+This is your development process made visible.
 
 ## Getting started
 
@@ -22,36 +25,54 @@ npm install
 npm start
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The scanner reads your `~/.claude/projects/` directory and builds the graph. No data leaves your machine.
+Open [http://localhost:3000](http://localhost:3000). Everything runs locally — the server reads `~/.claude/projects/` and indexes into a local DuckDB database. Nothing is sent anywhere.
 
-## What you'll see
+## Views
 
-**The loader** — a 3D code flythrough where your actual file paths, prompts, code snippets, and Claude's responses fly toward you through a starfield. It accelerates as scanning progresses. The particles are color-coded: orange for prompts, green for code, blue for files, purple for snippets.
+**3D Flythrough** — the loading screen. Your file paths, prompts, code snippets, and Claude's responses fly toward you through a starfield while the database syncs. Color-coded: orange for prompts, green for code, blue for files, purple for snippets.
 
-**The graph** — a D3 force-directed layout. Blue circles are sessions (sized by tool call count). Green/amber circles are files (sized by how many sessions touched them). Edges show read/write relationships. Click any node to inspect it. Pop out detail panels into floating windows to compare sessions side by side.
+**Session Graph** — a D3 force-directed layout. Blue circles are sessions (sized by tool call count). Green/amber circles are files (sized by cross-session frequency). Click any node to inspect. Pop out detail panels into floating windows.
 
-**The controls** — filter by project, time range, or minimum shared-session count. Search across all your messages and files with `Cmd+K`. View repeated command patterns. Replay today's activity with the movie controller.
+**Sequencer** — a canvas-based piano-roll timeline with three view modes:
+- **Session** — one track per session, clustered by file affinity, bin-packed into lanes
+- **File** — one track per file, grouped by directory hierarchy. See every edit to a file across all sessions on one row.
+- **Timeline** — all events from all sessions on a single chronological track. See the true order of operations across your agents.
+
+Click any clip in the sequencer to expand it into a full transcript with exchange-based layout: your prompt, Claude's response, and file diffs — each column scrolls independently.
 
 ## Features
 
 - **Force-directed session graph** with zoom, pan, drag, and detail panels
-- **3D code flythrough loader** with real-time SSE streaming of discoveries
-- **Full-text search** across user messages and file paths (`Cmd+K`)
+- **Sequencer timeline** with session, file, and chronological view modes
+- **Inline diffs** — see exactly what changed in each exchange
+- **Full-text search** across all messages and file paths (`Cmd+K`)
 - **Time filtering** — all / month / week / today / 1h
-- **Replay controller** — VCR-style playback of today's activity with scrub, speed control, and keyboard shortcuts
+- **Replay controller** — VCR-style playback with scrub and speed control
 - **Pattern detection** — surfaces repeated commands across sessions
 - **Detachable panels** — pop out, drag, resize, compare side by side
-- **Keyboard shortcuts** — Stripe-style hints, bottom bar, cheat sheet (`?`)
-- **Pan mode** — hold Shift or Alt/Option to pan without clicking nodes
-- **Guided tour** — walks new users through every feature
+- **DuckDB storage** — incremental indexing, fast queries, git history integration
+- **Keyboard shortcuts** — Stripe-style hints, cheat sheet (`?`)
+
+## Privacy
+
+**Your data stays on your machine.** The Context Map:
+- Runs entirely on `localhost`
+- Reads only from `~/.claude/projects/` (your existing Claude Code logs)
+- Stores its index in a local DuckDB file (`contextmap.duckdb`)
+- Makes zero network requests to external services
+- Has no analytics, tracking, or telemetry
+- Requires no account or API key
 
 ## Architecture
 
-Three files. No build step. No framework.
+No build step. No framework.
 
-- **`scanner.js`** — reads `~/.claude/projects/`, parses JSONL session logs, extracts file interactions, user messages, code snippets, and tool calls. Emits discoveries via callback for real-time streaming.
-- **`server.js`** — Express server with SSE streaming (`/api/scan-stream`), graph API (`/api/graph`), search (`/api/search`), patterns (`/api/patterns`), replay (`/api/replay`), and session detail endpoints. 30-second cache.
-- **`public/index.html`** — single-file frontend. D3 graph, 3D canvas flythrough, movie controller, search, patterns, tour, keyboard shortcuts. No build step, no framework, no dependencies beyond D3.
+- **`scanner.js`** — reads `~/.claude/projects/`, parses JSONL session logs, extracts file interactions, messages, code snippets, and tool calls
+- **`server.js`** — Express server with graph, search, sequencer, transcript, and pattern APIs. SSE streaming for live scan progress.
+- **`db.js`** — DuckDB storage layer for incremental indexing and fast queries
+- **`git-scanner.js`** — syncs git commit history from workspace repos
+- **`public/index.html`** — main frontend: D3 graph, flythrough, controls, search
+- **`public/sequencer.js`** — canvas-based sequencer/timeline view
 
 ## Requirements
 
