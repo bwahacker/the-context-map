@@ -80,3 +80,7 @@ No build step. No framework.
 
 - Node.js 18+
 - Claude Code installed (needs `~/.claude/projects/` with session logs)
+
+## Contact
+
+Found a bug? Want to chat? mitch.haile@gmail.com
