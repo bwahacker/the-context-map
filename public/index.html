@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>The Context Map</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-binarytree@1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-octree@1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3-force-3d@3/dist/d3-force-3d.min.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+    }
+  }
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0f; color: #c8c8d0; font-family: 'SF Mono', 'Fira Code', monospace; overflow: hidden; }
@@ -460,6 +471,7 @@
       <button class="nav-tab" data-view="graph" onclick="switchView('graph')">Graph</button>
       <button class="nav-tab" data-view="fs-timeline" onclick="switchView('fs-timeline')">FS Timeline</button>
       <button class="nav-tab" data-view="heatmap" onclick="switchView('heatmap')">Heatmap</button>
+      <button class="nav-tab" data-view="sequencer" onclick="switchView('sequencer')">Sequencer</button>
     </div>
     <div class="nav-sep"></div>
     <div id="searchBox">
@@ -532,6 +544,7 @@
 
   <canvas id="fsTimelineCanvas" style="display:none;position:fixed;top:52px;left:0;width:100vw;height:calc(100vh - 52px);z-index:20;"></canvas>
   <canvas id="heatmapCanvas" style="display:none;position:fixed;top:52px;left:0;width:100vw;height:calc(100vh - 52px);z-index:20;"></canvas>
+  <canvas id="sequencerCanvas" style="display:none;position:fixed;top:44px;left:0;width:100vw;height:calc(100vh - 44px);z-index:20;"></canvas>
 
   <!-- Right-side timeline -->
   <div id="timeline">
@@ -541,7 +554,8 @@
     </div>
   </div>
 
-  <svg id="graph"></svg>
+  <div id="graph3d-container" style="position:fixed;top:44px;left:0;width:100vw;height:calc(100vh - 44px);display:none;z-index:1;"></div>
+  <svg id="graph" style="display:none;"></svg>
 
   <div id="detail">
     <div class="detail-toolbar">
@@ -604,7 +618,7 @@
 const svg=d3.select("#graph"),width=innerWidth,height=innerHeight;
 svg.attr("width",width).attr("height",height);
 const g=svg.append("g");
-const zoom=d3.zoom().scaleExtent([0.1,8]).on("zoom",e=>g.attr("transform",e.transform));
+const zoom=d3.zoom().scaleExtent([0.1,8]).translateExtent([[-width*2,-height*2],[width*3,height*3]]).on("zoom",e=>g.attr("transform",e.transform));
 svg.call(zoom);
 const tooltip=d3.select("#tooltip");
 let simulation,initialLoad=true,currentTimeRange="all",currentLinks=null,floatN=0;
@@ -619,6 +633,9 @@ let discoveredItems = [];
 let discoveryQueue = [];
 let particlePool = [];
 let timePlanes = []; // date/time separator planes flying toward camera
+let cachedBgGradient = null;
+let cachedBgW = 0, cachedBgH = 0;
+let loaderFrameCount = 0;
 let fileCount = 0, snippetCount = 0, promptCount = 0, codeCount = 0, responseCount = 0;
 let loadProgress = 0;
 let queueTimer = 0; // accumulator for draining queue
@@ -763,6 +780,13 @@ class Particle {
     if (sx < -300 || sx > W()+300 || sy < -100 || sy > H()+100) return;
 
     const fs = Math.max(1.5, this.size * scale);
+    // Skip particles too small to read — just draw a dot
+    if (fs < 4) {
+      c.globalAlpha = Math.max(0, Math.min(0.4, (2000 - this.z) / 2000));
+      c.fillStyle = this.color;
+      c.fillRect(sx - 1, sy - 1, 2, 2);
+      return;
+    }
 
     let alpha;
     if (this.z > 1400) alpha = (2000 - this.z) / 600;
@@ -791,10 +815,10 @@ class Particle {
     const isResponse = this.kind === "response";
     const isTitle = this.kind === "title";
 
-    // Glow — stronger for prompts and titles
-    if (this.z < 400 && this.bright && fs > 8) {
+    // Glow — only for very close, large particles (shadowBlur is expensive)
+    if (this.z < 200 && this.bright && fs > 14) {
       c.shadowColor = this.color;
-      c.shadowBlur = isPrompt || isTitle ? (16 + pulse * 24) : isCode ? (10 + pulse * 18) : (12 + pulse * 16);
+      c.shadowBlur = isPrompt || isTitle ? 8 : 5;
     }
 
     // Motion streak
@@ -1051,13 +1075,17 @@ function animateLoader(now) {
   lt = now;
 
   lctx.clearRect(0, 0, W(), H());
+  loaderFrameCount++;
 
-  // Background gradient
-  const bg = lctx.createRadialGradient(W()/2, H()/2, 0, W()/2, H()/2, W()*0.8);
-  bg.addColorStop(0, "#0c0c18");
-  bg.addColorStop(0.5, "#080812");
-  bg.addColorStop(1, "#040408");
-  lctx.fillStyle = bg;
+  // Background gradient (cached — only recreate on resize)
+  if (!cachedBgGradient || cachedBgW !== W() || cachedBgH !== H()) {
+    cachedBgW = W(); cachedBgH = H();
+    cachedBgGradient = lctx.createRadialGradient(W()/2, H()/2, 0, W()/2, H()/2, W()*0.8);
+    cachedBgGradient.addColorStop(0, "#0c0c18");
+    cachedBgGradient.addColorStop(0.5, "#080812");
+    cachedBgGradient.addColorStop(1, "#040408");
+  }
+  lctx.fillStyle = cachedBgGradient;
   lctx.fillRect(0, 0, W(), H());
 
   // Grid lines
@@ -1080,13 +1108,21 @@ function animateLoader(now) {
   }
   lctx.globalAlpha = 1;
 
-  // Stars
+  // Stars — batch into single path where possible
+  const halfW = W()/2, halfH = H()/2;
+  const accel = 1 + (loadProgress / 100) * 2;
   for (const s of stars) {
     const sc = 600 / s.z;
-    const sx = W()/2 + s.x * sc;
-    const sy = H()/2 + s.y * sc;
+    const sx = halfW + s.x * sc;
+    const sy = halfH + s.y * sc;
+    // Skip off-screen stars
+    if (sx < -20 || sx > W()+20 || sy < -20 || sy > H()+20) {
+      s.z += s.vz * accel * dt;
+      if (s.z < 1) { s.z = 2000; s.x = (Math.random()-0.5)*3000; s.y = (Math.random()-0.5)*2000; }
+      continue;
+    }
     if (!nearCursor(sx, sy)) {
-      s.z += s.vz * (1 + (loadProgress / 100) * 2) * dt;
+      s.z += s.vz * accel * dt;
       if (s.z < 1) { s.z = 2000; s.x = (Math.random()-0.5)*3000; s.y = (Math.random()-0.5)*2000; }
     }
     const r = Math.max(0.3, 1.2 * sc);
@@ -1116,8 +1152,8 @@ function animateLoader(now) {
     timePlanes[i].draw(lctx);
   }
 
-  // Particles — depth sort
-  particlePool.sort((a, b) => b.z - a.z);
+  // Particles — depth sort every 3rd frame to reduce overhead
+  if (loaderFrameCount % 3 === 0) particlePool.sort((a, b) => b.z - a.z);
   for (const p of particlePool) { p.update(dt); p.draw(lctx); }
 
   // Grow particle count with discoveries
@@ -1125,12 +1161,14 @@ function animateLoader(now) {
     particlePool.push(new Particle());
   }
 
-  // Subtle center glow
-  const cg = lctx.createRadialGradient(W()/2, H()/2, 0, W()/2, H()/2, 200);
-  cg.addColorStop(0, "rgba(80,80,180,0.03)");
-  cg.addColorStop(1, "rgba(0,0,0,0)");
-  lctx.fillStyle = cg;
-  lctx.fillRect(0, 0, W(), H());
+  // Subtle center glow (skip every other frame — barely visible)
+  if (loaderFrameCount % 2 === 0) {
+    const cg = lctx.createRadialGradient(W()/2, H()/2, 0, W()/2, H()/2, 200);
+    cg.addColorStop(0, "rgba(80,80,180,0.03)");
+    cg.addColorStop(1, "rgba(0,0,0,0)");
+    lctx.fillStyle = cg;
+    lctx.fillRect(0, 0, W(), H());
+  }
 
   requestAnimationFrame(animateLoader);
 }
@@ -1468,6 +1506,21 @@ document.getElementById("searchTypeSelect").addEventListener("change",()=>{const
 // VIEW SWITCHING — unified tab navigation
 // ═══════════════════════════════════════════════════════════════════
 var currentView = "flythrough";
+
+// Load flythrough discoveries via SSE (used when switching to flythrough without data)
+function loadFlythroughDiscoveries() {
+  var es = new EventSource("/api/scan-stream");
+  es.addEventListener("discoveries", function(e) {
+    var d = JSON.parse(e.data);
+    if (d.items) {
+      loader.loadDiscoveries(d.items);
+      loader.set(30 + Math.min(50, allDiscoveries.length / 20), allDiscoveries.length + " discoveries — flying through time...");
+    }
+  });
+  es.addEventListener("done", function() { es.close(); });
+  es.onerror = function() { es.close(); };
+}
+
 function switchView(view) {
   currentView = view;
   // Update tab highlights
@@ -1476,24 +1529,31 @@ function switchView(view) {
   });
   // Hide everything first
   var graph = document.getElementById("graph");
+  var graph3d = document.getElementById("graph3d-container");
   var loader = document.getElementById("loader");
   var controls = document.getElementById("controls");
   var fsCvs = document.getElementById("fsTimelineCanvas");
   var hmCvs = document.getElementById("heatmapCanvas");
+  var seqCvs = document.getElementById("sequencerCanvas");
   var movieBarEl = document.getElementById("movieBar");
   var timelineEl = document.getElementById("timeline");
 
   if (graph) graph.style.display = "none";
+  if (graph3d && typeof Graph3D !== "undefined") Graph3D.hide();
   if (loader) loader.style.display = "none";
   if (controls) controls.classList.add("hidden");
   if (fsCvs) fsCvs.style.display = "none";
   if (hmCvs) hmCvs.style.display = "none";
+  if (seqCvs) seqCvs.style.display = "none";
   if (movieBarEl) movieBarEl.classList.remove("active");
   if (timelineEl) timelineEl.classList.remove("active");
 
   // Hide canvas views cleanly
   if (typeof FsTimeline !== "undefined" && view !== "fs-timeline") FsTimeline.hide();
   if (typeof Heatmap !== "undefined" && view !== "heatmap") Heatmap.hide();
+  if (typeof Sequencer !== "undefined" && view !== "sequencer") Sequencer.hide();
+  // Stop flythrough animation when switching away
+  if (view !== "flythrough") loaderRunning = false;
 
   switch (view) {
     case "flythrough":
@@ -1503,9 +1563,26 @@ function switchView(view) {
       requestAnimationFrame(animateLoader);
       if (movieBarEl) movieBarEl.classList.add("active");
       if (timelineEl) timelineEl.classList.add("active");
+      // If no discoveries loaded yet, fetch them via SSE
+      if (allDiscoveries.length === 0) {
+        loadFlythroughDiscoveries();
+      } else {
+        // Replay existing discoveries
+        promptCount = codeCount = responseCount = fileCount = snippetCount = 0;
+        discoveryQueue.length = 0;
+        discoveredItems.length = 0;
+        particlePool.length = 0;
+        timePlanes.length = 0;
+        drainQueue._lastPlaneKey = "";
+        discoveryQueue.push(...allDiscoveries);
+      }
       break;
     case "graph":
-      if (graph) graph.style.display = "";
+      if (typeof Graph3D !== "undefined") {
+        Graph3D.show();
+      } else {
+        if (graph) graph.style.display = "";
+      }
       if (controls) controls.classList.remove("hidden");
       loadGraph();
       break;
@@ -1514,6 +1591,9 @@ function switchView(view) {
       break;
     case "heatmap":
       if (typeof Heatmap !== "undefined") Heatmap.show();
+      break;
+    case "sequencer":
+      if (typeof Sequencer !== "undefined") Sequencer.show();
       break;
   }
 }
@@ -1544,7 +1624,10 @@ document.addEventListener("keydown",function(e){
   var timeKeys={"1":"all","2":"month","3":"week","4":"48h","5":"24h","6":"1h"};
   if(timeKeys[e.key]){
     document.querySelectorAll(".time-btn").forEach(function(b){b.classList.remove("active");if(b.dataset.range===timeKeys[e.key])b.classList.add("active");});
-    currentTimeRange=timeKeys[e.key];loadGraph();return;
+    currentTimeRange=timeKeys[e.key];
+    if(currentView==="sequencer"&&typeof Sequencer!=="undefined"){Sequencer.refresh();}
+    else{loadGraph();}
+    return;
   }
 
   // Left/Right arrows — step through time periods
@@ -1583,6 +1666,9 @@ document.addEventListener("keydown",function(e){
   // H — heatmap
   if(e.key==="h"){switchView(currentView==="heatmap"?"graph":"heatmap");return;}
 
+  // S — sequencer
+  if(e.key==="s"){switchView(currentView==="sequencer"?"graph":"sequencer");return;}
+
   // G — graph
   if(e.key==="g"){switchView("graph");return;}
 
@@ -1613,6 +1699,11 @@ function showSuggestions(){
 
 async function runSearch(query){
   document.getElementById("searchSuggestions").classList.remove("open");
+  // If in sequencer view, filter the sequencer instead of showing search results
+  if(currentView==="sequencer"&&typeof Sequencer!=="undefined"){
+    Sequencer.search(query);
+    return;
+  }
   try{const r=await fetch("/api/search?"+new URLSearchParams({q:query,type:document.getElementById("searchTypeSelect").value})).then(r=>r.json());showSearchResults(query,r);}catch(e){console.error(e);}
 }
 
@@ -1664,6 +1755,10 @@ async function loadTranscript(sessionId,title){
 }
 
 function highlightNode(id){
+  if(typeof Graph3D!=="undefined"&&currentView==="graph"){
+    Graph3D.highlightNode(id);
+    return;
+  }
   g.selectAll("circle").attr("opacity",function(d){return d.id===id?1:0.3;});
   g.selectAll("line").attr("stroke-opacity",0.1);
   g.selectAll("text").attr("opacity",function(d){return d.id===id?1:0.3;});
@@ -1687,7 +1782,10 @@ document.addEventListener("click",function(e){var p=document.getElementById("pat
 // ── Time Filters ──
 document.querySelectorAll(".time-btn").forEach(function(b){b.addEventListener("click",function(){
   document.querySelectorAll(".time-btn").forEach(function(x){x.classList.remove("active");});
-  b.classList.add("active");currentTimeRange=b.dataset.range;loadGraph();
+  b.classList.add("active");currentTimeRange=b.dataset.range;
+  if(currentView==="sequencer"&&typeof Sequencer!=="undefined"){Sequencer.refresh();}
+  else if(currentView==="heatmap"&&typeof Heatmap!=="undefined"){Heatmap.refresh();}
+  else{loadGraph();}
 });});
 
 // ── Pop-out Panels ──
@@ -1797,9 +1895,13 @@ async function loadGraph(){
   document.getElementById("statEdges").textContent=graph.edges.length;
   document.getElementById("statShared").textContent=graph.stats?graph.stats.totalSessions||graph.stats.sharedFiles||0:0;
   updateOrientBar(graph);
-  render(graph);
-  // Reset zoom to fit the new graph
-  if(!initialLoad) svg.transition().duration(400).call(zoom.transform,d3.zoomIdentity);
+  // Route to 3D or 2D renderer
+  if(typeof Graph3D!=="undefined"&&currentView==="graph"){
+    Graph3D.render(graph);
+  } else {
+    render(graph);
+    if(!initialLoad) svg.transition().duration(400).call(zoom.transform,d3.zoomIdentity);
+  }
   // Cache for instant reload
   try { sessionStorage.setItem("contextmap-graph", JSON.stringify(graph)); } catch(e) {}
   if(initialLoad){
@@ -1831,7 +1933,10 @@ function render(graph){
       return isFileGraph?-80*chargeScale:(d.type==="session"?-200:-60)*chargeScale;
     }))
     .force("center",d3.forceCenter(width/2,height/2))
-    .force("collision",d3.forceCollide().radius(function(d){return nodeR(d)+2;}));
+    .force("collision",d3.forceCollide().radius(function(d){return nodeR(d)+2;}))
+    .alphaDecay(0.05)
+    .alphaMin(0.01)
+    .velocityDecay(0.4);
   // Edge color: co-occurrence weight → amber intensity
   function edgeColor(d){
     if(!isFileGraph)return d.writes>0?"#5b3a3a":"#2a3a4a";
@@ -1854,37 +1959,6 @@ function render(graph){
     .attr("font-size",function(d){return isFileGraph?(d.sessionCount>3?10:8):(d.type==="session"?9:8);})
     .attr("fill",function(d){return d.type==="session"?"#9b9bff":(d.shared?"#cc9944":"#88aa88");})
     .attr("text-anchor","middle").attr("dy",function(d){return nodeR(d)+12;});
-  // Track cursor in graph-space for proximity damping
-  var cursorPos=null,pinnedNodes=[];
-  var CURSOR_RADIUS=120; // px radius of influence
-  svg.on("mousemove.cursor",function(e){
-    var t=d3.zoomTransform(svg.node());
-    cursorPos=[(e.offsetX-t.x)/t.k,(e.offsetY-t.y)/t.k];
-  }).on("mouseleave.cursor",function(){
-    // Release all pinned nodes
-    for(var n of pinnedNodes){n.fx=null;n.fy=null;}
-    pinnedNodes=[];cursorPos=null;
-  });
-
-  // On each tick, pin nearby nodes proportionally to distance
-  simulation.on("tick.cursor",function(){
-    if(!cursorPos)return;
-    // Release previously pinned nodes that are now far
-    for(var i=pinnedNodes.length-1;i>=0;i--){
-      var n=pinnedNodes[i];
-      var dx=n.x-cursorPos[0],dy=n.y-cursorPos[1],dist=Math.sqrt(dx*dx+dy*dy);
-      if(dist>CURSOR_RADIUS){n.fx=null;n.fy=null;pinnedNodes.splice(i,1);}
-    }
-    // Pin nodes within radius
-    for(var n of nodes){
-      if(n.fx!==null&&n.fy!==null&&!pinnedNodes.includes(n))continue; // skip drag-pinned
-      var dx=n.x-cursorPos[0],dy=n.y-cursorPos[1],dist=Math.sqrt(dx*dx+dy*dy);
-      if(dist<CURSOR_RADIUS){
-        n.fx=n.x;n.fy=n.y;
-        if(!pinnedNodes.includes(n))pinnedNodes.push(n);
-      }
-    }
-  });
 
   var selectedNodeId = null;
   window._clearSelection = function() { selectedNodeId = null; restoreGraph(); };
@@ -2034,14 +2108,48 @@ function dd(e){e.subject.fx=e.x;e.subject.fy=e.y;}
 function de(e){if(!e.active)simulation.alphaTarget(0);e.subject.fx=null;e.subject.fy=null;}
 
 document.getElementById("projectFilter").addEventListener("change",function(){
+  var proj = this.value;
   if(currentView==="heatmap"){
     if(typeof Heatmap!=="undefined")Heatmap.refresh();
-  } else if(currentView==="flythrough"||loaderRunning){
-    switchView("graph");
+  } else if(currentView==="fs-timeline"){
+    if(typeof FsTimeline!=="undefined")FsTimeline.refresh();
+  } else if(currentView==="sequencer"){
+    if(typeof Sequencer!=="undefined")Sequencer.refresh();
+  } else if(currentView==="flythrough") {
+    // Filter flythrough discoveries by project — don't switch view
+    filterFlythroughByProject(proj);
   } else {
     loadGraph();
   }
 });
+
+function filterFlythroughByProject(proj) {
+  if (!proj) {
+    // Show all
+    discoveryQueue.length = 0;
+    discoveredItems.length = 0;
+    timePlanes.length = 0;
+    drainQueue._lastPlaneKey = "";
+    promptCount = codeCount = responseCount = fileCount = snippetCount = 0;
+    discoveryQueue.push(...allDiscoveries);
+    rebuildTimeline();
+  } else {
+    // Need to find sessionIds for this project — query the API
+    fetch("/api/sessions").then(r=>r.json()).then(function(sessions){
+      var sessionIds = new Set(sessions.filter(function(s){ return s.project && s.project.includes(proj); }).map(function(s){ return s.id; }));
+      var filtered = allDiscoveries.filter(function(d){ return d.sessionId && sessionIds.has(d.sessionId); });
+      discoveryQueue.length = 0;
+      discoveredItems.length = 0;
+      timePlanes.length = 0;
+      drainQueue._lastPlaneKey = "";
+      promptCount = codeCount = responseCount = fileCount = snippetCount = 0;
+      discoveryQueue.push(...filtered);
+      rebuildTimelineFrom(filtered);
+      moviePosition = 0;
+      updateMoviePosition();
+    });
+  }
+}
 document.getElementById("minSessions").addEventListener("input",function(e){document.getElementById("minSessionsVal").textContent=e.target.value;loadGraph();});
 
 // ── Tour ──
@@ -2095,17 +2203,21 @@ loadProjects();
       updateOrientBar(graph);
       render(graph);
       switchView("graph");
-      // Refresh in background for fresh data
-      fetch("/api/graph").then(function(r){return r.json();}).then(function(g){
+      // Refresh in background for fresh data (use file-graph, fall back to old graph)
+      fetch("/api/file-graph").then(function(r){return r.json();}).then(function(g){
+        if(g.error) return fetch("/api/graph").then(function(r){return r.json();});
+        return g;
+      }).then(function(g){
+        if(!g || g.error) return;
         sessionStorage.setItem("contextmap-graph", JSON.stringify(g));
         document.getElementById("statNodes").textContent = g.nodes.length;
         document.getElementById("statEdges").textContent = g.edges.length;
-        document.getElementById("statShared").textContent = g.stats ? g.stats.sharedFiles || 0 : 0;
+        document.getElementById("statShared").textContent = g.stats ? g.stats.totalSessions || g.stats.sharedFiles || 0 : 0;
         updateOrientBar(g);
         render(g);
       }).catch(function(){});
-      // Load discoveries in background for timeline (non-blocking)
-      fetch("/api/scan-stream").then(function(){}).catch(function(){});
+      // Load discoveries in background for flythrough/timeline
+      loadFlythroughDiscoveries();
       loadSuggestions();
       return;
     } catch(e) { sessionStorage.removeItem("contextmap-graph"); }
@@ -2118,5 +2230,7 @@ loadProjects();
 </script>
 <script src="fs-timeline.js"></script>
 <script src="heatmap.js"></script>
+<script src="sequencer.js"></script>
+<script type="module" src="graph3d.js"></script>
 </body>
 </html>

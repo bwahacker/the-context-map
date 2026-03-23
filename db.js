@@ -257,13 +257,26 @@ async function sync(onProgress) {
       // Parse and index this file
       const sessionId = path.basename(fileName, ".jsonl");
 
-      // Delete old data for this session (re-index)
-      await db.run("DELETE FROM file_interactions WHERE session_id = ?", sessionId);
-      await db.run("DELETE FROM user_messages WHERE session_id = ?", sessionId);
-      await db.run("DELETE FROM tool_calls WHERE session_id = ?", sessionId);
-      await db.run("DELETE FROM sessions WHERE id = ?", sessionId);
+      // Subagent files: attribute file interactions to parent session, don't create separate session
+      const isSubagent = filePath.includes("/subagents/");
+      let parentSessionId = null;
+      if (isSubagent) {
+        // Path: .../projects/<proj>/<parent-uuid>/subagents/<agent-xxx>.jsonl
+        const parts = filePath.split("/");
+        const subIdx = parts.indexOf("subagents");
+        if (subIdx > 0) parentSessionId = parts[subIdx - 1];
+      }
 
-      await indexSessionFile(filePath, sessionId, projectDir);
+      // Delete old data for this session (re-index)
+      const deleteId = isSubagent ? sessionId : sessionId;
+      await db.run("DELETE FROM file_interactions WHERE session_id = ?", deleteId);
+      await db.run("DELETE FROM user_messages WHERE session_id = ?", deleteId);
+      await db.run("DELETE FROM tool_calls WHERE session_id = ?", deleteId);
+      if (!isSubagent) {
+        await db.run("DELETE FROM sessions WHERE id = ?", sessionId);
+      }
+
+      await indexSessionFile(filePath, isSubagent ? (parentSessionId || sessionId) : sessionId, projectDir, isSubagent);
 
       // Mark as indexed
       await db.run("DELETE FROM indexed_files WHERE file_path = ?", filePath);
@@ -372,7 +385,7 @@ async function materialize() {
   console.timeEnd("materialize");
 }
 
-async function indexSessionFile(filePath, sessionId, projectDir) {
+async function indexSessionFile(filePath, sessionId, projectDir, isSubagent = false) {
   const session = {
     id: sessionId,
     projectDir,
@@ -469,6 +482,17 @@ async function indexSessionFile(filePath, sessionId, projectDir) {
   session.project = session.cwd
     ? session.cwd.split("/").slice(-2).join("/")
     : projectDir;
+
+  // Subagents: only index file interactions (attributed to parent session), skip session/messages/tool_calls
+  if (isSubagent) {
+    for (const fi of fileInteractions) {
+      await db.run(
+        "INSERT INTO file_interactions (session_id, file_path, action, tool, timestamp) VALUES (?, ?, ?, ?, ?)",
+        session.id, fi.filePath, fi.action, fi.tool, fi.timestamp
+      );
+    }
+    return;
+  }
 
   // Insert session
   await db.run(`
@@ -1174,10 +1198,120 @@ async function getHeatmapData(project) {
   };
 }
 
+/**
+ * Sequencer data — sessions with all events (messages + file interactions) for piano-roll view.
+ */
+async function getSequencerData({ project, timeRange, search } = {}) {
+  const cutoffs = {
+    "1h": "now() - INTERVAL 1 HOUR",
+    "24h": "now() - INTERVAL 1 DAY",
+    "48h": "now() - INTERVAL 2 DAY",
+    "week": "now() - INTERVAL 7 DAY",
+    "month": "now() - INTERVAL 30 DAY",
+    "all": "'1970-01-01'::TIMESTAMP",
+  };
+  const cutoff = cutoffs[timeRange] || cutoffs["all"];
+
+  let projectFilter = "";
+  const params = [];
+  if (project) {
+    projectFilter = " AND s.project_dir LIKE ?";
+    params.push(`%${project}%`);
+  }
+
+  // If searching, find matching session IDs first
+  let searchFilter = "";
+  if (search) {
+    const searchSessions = await db.all(`
+      SELECT DISTINCT session_id FROM (
+        SELECT session_id FROM user_messages WHERE LOWER(text) LIKE LOWER(?)
+        UNION
+        SELECT session_id FROM file_interactions WHERE LOWER(file_path) LIKE LOWER(?)
+      )
+    `, `%${search}%`, `%${search}%`);
+    const ids = searchSessions.map(r => `'${r.session_id}'`).join(",");
+    if (ids.length === 0) return { sessions: [], timeRange: { min: null, max: null } };
+    searchFilter = ` AND s.id IN (${ids})`;
+  }
+
+  // Get sessions
+  const sessions = await db.all(`
+    SELECT s.id, s.title, s.project, s.project_dir, s.start_time, s.end_time,
+           s.messages, s.tool_calls
+    FROM sessions s
+    WHERE s.start_time >= ${cutoff} ${projectFilter} ${searchFilter}
+    ORDER BY s.project, s.start_time
+  `, ...params);
+
+  if (sessions.length === 0) return { sessions: [], timeRange: { min: null, max: null } };
+
+  const sessionIds = sessions.map(s => `'${s.id}'`).join(",");
+
+  // Get all events for these sessions in one go
+  const events = await db.all(`
+    SELECT session_id, 'user' AS type, text, NULL AS file_path, NULL AS tool,
+           timestamp, LENGTH(text) AS length
+    FROM user_messages
+    WHERE session_id IN (${sessionIds}) AND timestamp IS NOT NULL
+
+    UNION ALL
+
+    SELECT session_id, action AS type, NULL AS text, file_path, tool,
+           timestamp, NULL AS length
+    FROM file_interactions
+    WHERE session_id IN (${sessionIds}) AND timestamp IS NOT NULL
+
+    ORDER BY session_id, timestamp
+  `);
+
+  // Group events into sessions
+  const eventMap = new Map();
+  for (const e of events) {
+    if (!eventMap.has(e.session_id)) eventMap.set(e.session_id, []);
+    eventMap.get(e.session_id).push({
+      type: e.type,
+      text: e.text || null,
+      file: e.file_path || null,
+      tool: e.tool || null,
+      ts: e.timestamp,
+      length: e.length || 0,
+    });
+  }
+
+  const result = sessions.map(s => {
+    // Use first user message as title fallback
+    let fallbackTitle = null;
+    const evts = eventMap.get(s.id) || [];
+    const firstMsg = evts.find(e => e.type === "user" && e.text);
+    if (firstMsg) {
+      fallbackTitle = firstMsg.text.replace(/<[^>]+>/g, "").trim().slice(0, 60);
+      if (firstMsg.text.length > 60) fallbackTitle += "…";
+    }
+    return {
+    id: s.id,
+    title: s.title || fallbackTitle || "Session " + s.id.slice(0, 6),
+    project: s.project,
+    startTime: s.start_time,
+    endTime: s.end_time,
+    messages: s.messages,
+    toolCalls: s.tool_calls,
+    events: evts,
+  };
+  });
+
+  // Time range
+  const times = sessions.flatMap(s => [s.start_time, s.end_time].filter(Boolean)).map(t => new Date(t).getTime());
+  const min = times.length ? new Date(Math.min(...times)).toISOString() : null;
+  const max = times.length ? new Date(Math.max(...times)).toISOString() : null;
+
+  return { sessions: result, timeRange: { min, max } };
+}
+
 module.exports = {
   init, sync, close, query,
   getGraph, search, getPatterns, getReplayEvents,
   getProjects, getSession, getStats,
   getGitRepos, getGitTree, getGitChanges, getActivityNear,
   getDiscoveries, getQuickCounts, getHeatmapData, getFileStory, getFileGraph,
+  getSequencerData,
 };

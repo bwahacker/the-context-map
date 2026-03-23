@@ -674,10 +674,12 @@ window.FsTimeline = (function () {
         return;
       }
 
-      // Pick this project's repo first, otherwise smallest
+      // Pick repo matching current project filter, or this project, or smallest
+      const projFilter = document.getElementById("projectFilter")?.value || "";
+      const matchedRepo = projFilter ? allRepos.find(r => r.repo_path.includes(projFilter.split("/").pop())) : null;
       const thisProject = allRepos.find(r => location.pathname === "/" && r.repo_path.includes("context-map"));
       const preferred = allRepos.filter(r => r.commit_count < 1000);
-      currentRepo = (thisProject || (preferred.length ? preferred[0] : allRepos[allRepos.length - 1])).repo_path;
+      currentRepo = (matchedRepo || thisProject || (preferred.length ? preferred[0] : allRepos[allRepos.length - 1])).repo_path;
 
       showLoadingMsg("Loading " + currentRepo.split("/").slice(-2).join("/") + "...");
       await loadTree(currentRepo);
@@ -751,5 +753,18 @@ window.FsTimeline = (function () {
     window.addEventListener("load", () => setTimeout(show, 500));
   }
 
-  return { show, hide, toggle };
+  async function refresh() {
+    // Clear cached data and re-fetch with current project
+    hierarchy = null;
+    treeData = null;
+    partitionRoot = null;
+    cellMap.clear();
+    changes = [];
+    activity = null;
+    if (visible) {
+      await show();
+    }
+  }
+
+  return { show, hide, toggle, refresh };
 })();

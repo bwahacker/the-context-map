@@ -380,19 +380,52 @@ app.get("/api/session/:id", async (req, res) => {
 
 // Full message transcript for a session
 app.get("/api/session/:id/transcript", async (req, res) => {
+  const t0 = Date.now();
   try {
-    const data = await getData();
-    const session = data.sessions.find((s) => s.id === req.params.id);
-    if (!session) return res.status(404).json({ error: "not found" });
-
-    // Read the raw JSONL and extract all user + assistant messages in order
     const fs = require("fs");
     const path = require("path");
     const readline = require("readline");
     const CLAUDE_DIR = path.join(require("os").homedir(), ".claude", "projects");
-    const filePath = path.join(CLAUDE_DIR, session.project, session.id + ".jsonl");
 
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "session file not found" });
+    let filePath = null;
+    const sid = req.params.id;
+    console.log(`transcript: looking up ${sid.slice(0, 8)}...`);
+
+    // Try DuckDB sessions table — has project_dir, so we can build path directly
+    if (dbReady) {
+      try {
+        const rows = await store.query(
+          `SELECT project_dir FROM sessions WHERE id = ? LIMIT 1`, sid
+        );
+        if (rows.length > 0 && rows[0].project_dir) {
+          const candidate = path.join(CLAUDE_DIR, rows[0].project_dir, sid + ".jsonl");
+          if (fs.existsSync(candidate)) filePath = candidate;
+        }
+      } catch {}
+    }
+
+    // Fallback: try indexed_files table
+    if (!filePath && dbReady) {
+      try {
+        const rows = await store.query(
+          `SELECT file_path FROM indexed_files WHERE file_path LIKE ? LIMIT 1`,
+          `%${sid}%`
+        );
+        if (rows.length > 0) filePath = rows[0].file_path;
+      } catch {}
+    }
+
+    // Last resort: scan project directories
+    if (!filePath) {
+      try {
+        for (const d of fs.readdirSync(CLAUDE_DIR)) {
+          const candidate = path.join(CLAUDE_DIR, d, sid + ".jsonl");
+          if (fs.existsSync(candidate)) { filePath = candidate; break; }
+        }
+      } catch {}
+    }
+
+    if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ error: "session file not found" });
 
     const stream = fs.createReadStream(filePath, { encoding: "utf8" });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -411,7 +444,9 @@ app.get("/api/session/:id/transcript", async (req, res) => {
           text = content.filter(b => b.type === "text").map(b => b.text).join("\n");
         }
         // Strip system tags
-        text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").replace(/<[^>]+>/g, "").trim();
+        text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
+          .replace(/<ide_opened_file>[\s\S]*?<\/ide_opened_file>/g, "")
+          .replace(/<[^>]+>/g, "").trim();
         if (text && text.length > 3 && !text.startsWith("Note:") && !text.startsWith("The user opened")) {
           messages.push({ role: "user", text, timestamp: entry.timestamp });
         }
@@ -422,9 +457,29 @@ app.get("/api/session/:id/transcript", async (req, res) => {
         if (!Array.isArray(content)) continue;
         const textParts = [];
         const tools = [];
+        const edits = [];
         for (const block of content) {
           if (block.type === "text" && block.text) textParts.push(block.text);
-          if (block.type === "tool_use") tools.push(block.name);
+          if (block.type === "tool_use") {
+            tools.push(block.name);
+            const inp = block.input || {};
+            if (block.name === "Edit" || block.name === "Replace") {
+              edits.push({
+                tool: "Edit",
+                file: path.basename(inp.file_path || ""),
+                oldString: (inp.old_string || "").slice(0, 800),
+                newString: (inp.new_string || "").slice(0, 800),
+              });
+            } else if (block.name === "Write" || block.name === "CreateFile") {
+              const c = (inp.content || inp.file_text || "");
+              const lines = c.split("\n");
+              edits.push({
+                tool: "Write",
+                file: path.basename(inp.file_path || ""),
+                content: lines.length > 30 ? lines.slice(0, 30).join("\n") + "\n... (" + (lines.length - 30) + " more lines)" : c,
+              });
+            }
+          }
         }
         const text = textParts.join("\n").trim();
         if (text || tools.length) {
@@ -432,18 +487,118 @@ app.get("/api/session/:id/transcript", async (req, res) => {
             role: "assistant",
             text: text || null,
             tools: tools.length ? tools : undefined,
+            edits: edits.length ? edits : undefined,
             timestamp: entry.timestamp,
           });
         }
       }
     }
 
+    // Get session info from DB if available
+    let title = null, project = null;
+    if (dbReady) {
+      const sRows = await store.query(`SELECT title, project FROM sessions WHERE id = ? LIMIT 1`, req.params.id);
+      if (sRows.length) { title = sRows[0].title; project = sRows[0].project; }
+    }
+
     res.json({
-      sessionId: session.id,
-      title: session.title,
-      project: session.project,
+      sessionId: req.params.id,
+      title,
+      project,
       messages,
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// File diffs for a specific file within a session
+app.get("/api/session/:id/file-diffs", async (req, res) => {
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const readline = require("readline");
+    const CLAUDE_DIR = path.join(require("os").homedir(), ".claude", "projects");
+
+    const sid = req.params.id;
+    const targetFile = req.query.file;
+    if (!targetFile) return res.status(400).json({ error: "file query param required" });
+
+    // Find session JSONL — same lookup as transcript endpoint
+    let filePath = null;
+    if (dbReady) {
+      try {
+        const rows = await store.query(`SELECT project_dir FROM sessions WHERE id = ? LIMIT 1`, sid);
+        if (rows.length > 0 && rows[0].project_dir) {
+          const candidate = path.join(CLAUDE_DIR, rows[0].project_dir, sid + ".jsonl");
+          if (fs.existsSync(candidate)) filePath = candidate;
+        }
+      } catch {}
+    }
+    if (!filePath && dbReady) {
+      try {
+        const rows = await store.query(`SELECT file_path FROM indexed_files WHERE file_path LIKE ? LIMIT 1`, `%${sid}%`);
+        if (rows.length > 0) filePath = rows[0].file_path;
+      } catch {}
+    }
+    if (!filePath) {
+      try {
+        for (const d of fs.readdirSync(CLAUDE_DIR)) {
+          const candidate = path.join(CLAUDE_DIR, d, sid + ".jsonl");
+          if (fs.existsSync(candidate)) { filePath = candidate; break; }
+        }
+      } catch {}
+    }
+    if (!filePath || !fs.existsSync(filePath)) return res.status(404).json({ error: "session file not found" });
+
+    const stream = fs.createReadStream(filePath, { encoding: "utf8" });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    const diffs = [];
+    const targetBase = path.basename(targetFile);
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      if (entry.type !== "assistant" || !Array.isArray(entry.message?.content)) continue;
+
+      for (const block of entry.message.content) {
+        if (block.type !== "tool_use") continue;
+        const inp = block.input || {};
+        const fp = inp.file_path || inp.path || "";
+        if (!fp) continue;
+        // Match by full path, basename, or trailing path segment
+        const fpBase = path.basename(fp);
+        if (fp !== targetFile && fpBase !== targetBase && !fp.endsWith(targetFile) && !targetFile.endsWith(fpBase)) continue;
+
+        if (block.name === "Edit" || block.name === "Replace") {
+          diffs.push({
+            tool: "Edit",
+            timestamp: entry.timestamp || null,
+            oldString: (inp.old_string || "").slice(0, 2000),
+            newString: (inp.new_string || "").slice(0, 2000),
+          });
+        } else if (block.name === "Write" || block.name === "CreateFile") {
+          const content = (inp.content || inp.file_text || "");
+          const lines = content.split("\n");
+          diffs.push({
+            tool: "Write",
+            timestamp: entry.timestamp || null,
+            content: lines.length > 60 ? lines.slice(0, 60).join("\n") + "\n... (" + (lines.length - 60) + " more lines)" : content,
+          });
+        } else if (block.name === "Read") {
+          diffs.push({
+            tool: "Read",
+            timestamp: entry.timestamp || null,
+            file: fp,
+          });
+        }
+      }
+    }
+
+    res.json({ sessionId: sid, file: targetFile, diffs });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -600,6 +755,16 @@ app.get("/api/file-story", async (req, res) => {
     if (!dbReady) return res.status(503).json({ error: "DB not ready" });
     const story = await store.getFileStory(path);
     res.json(story);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Sequencer — piano-roll view of sessions + events
+app.get("/api/sequencer", async (req, res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+    const { project, timeRange, search } = req.query;
+    const data = await store.getSequencerData({ project, timeRange, search });
+    res.json(data);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
