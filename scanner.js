@@ -268,13 +268,27 @@ async function scanAllSessions(onProgress, onDiscovery) {
       fs.statSync(path.join(PROJECTS_DIR, d)).isDirectory()
     );
 
-  // Count total jsonl files for progress
+  // Gather all JSONL files recursively (includes subagent sessions)
+  function findJsonlFiles(dir) {
+    const results = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        results.push(...findJsonlFiles(fullPath));
+      } else if (entry.name.endsWith(".jsonl")) {
+        results.push(fullPath);
+      }
+    }
+    return results;
+  }
+
   let totalFiles = 0;
   let doneFiles = 0;
+  const projectFileMap = new Map(); // projDir -> [fullPaths]
   for (const pd of projectDirs) {
-    totalFiles += fs
-      .readdirSync(path.join(PROJECTS_DIR, pd))
-      .filter((f) => f.endsWith(".jsonl")).length;
+    const files = findJsonlFiles(path.join(PROJECTS_DIR, pd));
+    projectFileMap.set(pd, files);
+    totalFiles += files.length;
   }
 
   const allSessions = [];
@@ -292,16 +306,12 @@ async function scanAllSessions(onProgress, onDiscovery) {
   }) : null;
 
   for (const projDir of projectDirs) {
-    const projPath = path.join(PROJECTS_DIR, projDir);
     const decodedPath = decodeProjectPath(projDir);
-    const jsonlFiles = fs
-      .readdirSync(projPath)
-      .filter((f) => f.endsWith(".jsonl"));
+    const jsonlFiles = projectFileMap.get(projDir);
 
     const projSessions = [];
 
-    for (const jsonlFile of jsonlFiles) {
-      const fullPath = path.join(projPath, jsonlFile);
+    for (const fullPath of jsonlFiles) {
       try {
         const session = await parseSessionFile(fullPath, discoveries);
         session.project = projDir;

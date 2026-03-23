@@ -63,9 +63,11 @@
 - [ ] Export button configs directly
 
 ## Cross-Project Slicing
-- [ ] Slice and dice across projects — "I work across a lot of sessions"
-- [ ] Cross-project file hotspots (same file touched from different project contexts)
-- [ ] Cross-project topic search (find a topic across all projects at once)
+- [x] Data layer spans all projects — DuckDB indexes every project under `~/.claude/projects/`
+- [x] Cross-project file hotspots — queryable now via `/api/sql` (`GROUP BY file_path HAVING COUNT(DISTINCT project_dir) > 1`)
+- [x] Cross-project topic search — queryable now via `/api/sql` (`SELECT DISTINCT project FROM user_messages JOIN sessions ... WHERE text ILIKE '%topic%'`)
+- [ ] UI for cross-project file hotspots (dedicated view, not just raw SQL)
+- [ ] UI for cross-project topic search
 - [ ] Project comparison view — side-by-side activity
 
 ## Keyboard Shortcuts
@@ -109,9 +111,14 @@
 - [ ] Timeline display showing temporal context of current view
 
 ## DuckDB Storage Layer
-- [ ] Load all scanned data into DuckDB for incremental indexing
-- [ ] Don't re-scan unchanged session files — incremental updates only
-- [ ] SQL queries on messages, files, timestamps, content of changes
-- [ ] Sort by date, source tree, file name / full path, content of changes
-- [ ] Full-text search on message content
-- [ ] Should be a robust, standalone module — not bolted onto the current in-memory scanner
+- [x] Load all scanned data into DuckDB for incremental indexing — `db.js` standalone module
+- [x] Don't re-scan unchanged session files — incremental updates only (compares size + mtime, first scan ~60s, incremental <2s)
+- [x] SQL queries on messages, files, timestamps, content of changes — `/api/sql?q=SELECT...` endpoint
+- [x] Sort by date, source tree, file name / full path, content of changes — all queryable via SQL
+- [x] Full-text search on message content — `ILIKE` search via `store.search()`, wired into `/api/search`
+- [x] Should be a robust, standalone module — `db.js` works standalone (`node db.js` to sync + print stats)
+- [x] All server endpoints (`/api/graph`, `/api/search`, `/api/patterns`, `/api/replay`, `/api/projects`, `/api/sessions`) use DuckDB when ready, fallback to in-memory scanner
+- [x] Background re-sync every 60s picks up new sessions automatically
+- [x] No artificial result caps — search, patterns, and flythrough discoveries are uncapped
+- [x] Graceful shutdown closes DB cleanly
+- [x] New endpoints: `/api/stats`, `POST /api/sync` (force re-sync), `/api/sql` (ad-hoc read-only SQL)

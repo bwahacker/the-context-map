@@ -9,14 +9,34 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #0a0a0f; color: #c8c8d0; font-family: 'SF Mono', 'Fira Code', monospace; overflow: hidden; }
 
-    #controls {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
-      background: rgba(14, 14, 24, 0.99);
-      border-bottom: 3px solid #5a5aaa;
-      box-shadow: 0 4px 30px rgba(123, 123, 255, 0.15), 0 1px 0 rgba(123,123,255,0.1) inset;
-      padding: 16px 24px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+    /* ─── Single Nav Bar ─── */
+    #navbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 110;
+      background: #0c0c18;
+      border-bottom: 2px solid #3a3a6a;
+      padding: 0 16px; display: flex; align-items: center; height: 44px; gap: 12px;
     }
-    #controls h1 { font-size: 20px; color: #9b9bff; font-weight: 700; margin-right: 8px; text-shadow: 0 0 16px rgba(123,123,255,0.5); letter-spacing: 1px; }
+    #navbar h1 { font-size: 16px; color: #9b9bff; font-weight: 700; margin: 0; letter-spacing: 1px; white-space: nowrap; }
+    .nav-tabs { display: flex; gap: 0; height: 100%; align-items: stretch; }
+    .nav-tab {
+      background: none; border: none; color: #555; font-size: 13px; font-family: inherit;
+      padding: 0 14px; cursor: pointer; position: relative; transition: color 0.15s;
+      font-weight: 500;
+    }
+    .nav-tab:hover { color: #aaa; }
+    .nav-tab.active { color: #ddd; }
+    .nav-tab.active::after {
+      content: ''; position: absolute; bottom: 0; left: 8px; right: 8px;
+      height: 2px; background: #7b7bff; border-radius: 2px 2px 0 0;
+    }
+    .nav-sep { width: 1px; height: 24px; background: #333; }
+    .nav-right { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; white-space: nowrap; }
+    .nav-stat { color: #7b7bff; font-weight: 600; }
+
+    /* ─── Context controls (hidden — merged into navbar) ─── */
+    #controls { display: none; }
+    #controls.hidden { display: none; }
+    #controls h1 { display: none; }
     .ctrl-divider { width: 1px; height: 32px; background: #444; margin: 0 6px; }
     .ctrl-group { display: flex; align-items: center; gap: 8px; }
     .ctrl-group-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
@@ -37,6 +57,7 @@
     .time-btn:hover:not(.active) { background: #252540; color: #ccc; }
 
     .stats { font-size: 14px; color: #888; margin-left: auto; }
+    #orientBar { display: none; }
     .stats span { color: #9b9bff; font-weight: 600; }
     #graph { width: 100vw; height: 100vh; }
 
@@ -49,6 +70,8 @@
     #detail .file-list { margin-top: 10px; }
     #detail .file-list .file-entry { padding: 3px 0; border-bottom: 1px solid #1a1a24; display: flex; justify-content: space-between; }
     #detail .file-list .file-entry .fname { color: #aaa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+    .file-link { color: #8ab4f8; text-decoration: none; cursor: pointer; transition: color 0.15s; }
+    .file-link:hover { color: #bbccff; text-decoration: underline; }
     .badge { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; margin-left: 4px; }
     .badge.read { background: #1a2a3a; color: #5ba5e8; }
     .badge.write { background: #2a1a1a; color: #e85b5b; }
@@ -184,7 +207,7 @@
 
     /* ─── Right timeline ─── */
     #timeline {
-      position: fixed; right: 0; top: 0; bottom: 0; width: 260px; z-index: 101;
+      position: fixed; right: 0; top: 52px; bottom: 0; width: 260px; z-index: 101;
       background: rgba(8, 8, 16, 0.92);
       border-left: 1px solid #2a2a5a;
       display: none; flex-direction: column;
@@ -203,7 +226,16 @@
       padding: 8px 14px; margin: 0 0 2px;
       border-left: 3px solid #ff9b4a;
       color: #ff9b4a; font-size: 13px; font-weight: 600;
-      cursor: pointer;
+      cursor: pointer; position: relative;
+    }
+    #timeline .tl-now::before {
+      content: "▶"; position: absolute; left: -2px; top: 50%; transform: translateY(-50%);
+      font-size: 8px; color: #ff9b4a;
+      animation: pulse-arrow 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse-arrow {
+      0%,100% { opacity: 0.4; transform: translateY(-50%) scale(0.8); }
+      50% { opacity: 1; transform: translateY(-50%) scale(1.3); }
     }
     #timeline .tl-now:hover { background: rgba(255,155,74,0.08); }
     /* Day row */
@@ -252,9 +284,26 @@
       padding: 1px 6px; border-radius: 8px;
     }
 
+    /* Loading indicator */
+    #timeline .tl-loading {
+      padding: 8px 14px; color: #666; font-size: 12px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    #timeline .tl-loading-dot {
+      display: inline-block; width: 6px; height: 6px;
+      background: #7b7bff; border-radius: 50%;
+      animation: tl-pulse 1s ease-in-out infinite;
+    }
+    @keyframes tl-pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+    /* Day count badge */
+    #timeline .tl-day .tl-day-count {
+      font-size: 11px; color: #666; background: #15151f;
+      padding: 1px 7px; border-radius: 8px; margin-left: auto; margin-right: 8px;
+    }
+
     /* ─── Loader: 3D code flythrough ─── */
     #loader {
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 100;
+      position: fixed; top: 52px; left: 0; right: 0; bottom: 0; z-index: 100;
       background: #050508; overflow: hidden;
       transition: opacity 0.8s ease;
     }
@@ -286,13 +335,13 @@
       color: #555; font-size: 14px; pointer-events: none;
     }
     #loader-hud .title {
-      font-size: 36px; color: #9b9bff; font-weight: 600;
+      font-size: 36px; color: #cdcdff; font-weight: 600;
       letter-spacing: 12px; text-transform: uppercase;
-      text-shadow: 0 0 40px rgba(123,123,255,0.5), 0 0 80px rgba(123,123,255,0.2);
+      text-shadow: 0 0 40px rgba(160,160,255,0.6), 0 0 80px rgba(160,160,255,0.3);
       margin-bottom: 20px;
     }
     #loader-hud .subtitle {
-      font-size: 16px; color: #5a5a77; margin-bottom: 28px;
+      font-size: 16px; color: #9999bb; margin-bottom: 28px;
       letter-spacing: 4px;
     }
     #loader-hud .bar-track {
@@ -306,10 +355,10 @@
       box-shadow: 0 0 8px rgba(123,123,255,0.4);
     }
     #loader-hud .status {
-      font-size: 15px; color: #4a4a66; margin-top: 16px; letter-spacing: 1.5px;
+      font-size: 15px; color: #9999bb; margin-top: 16px; letter-spacing: 1.5px;
     }
     #loader-hud .counter {
-      font-size: 14px; color: #555; margin-top: 8px;
+      font-size: 14px; color: #aaaacc; margin-top: 8px;
       font-variant-numeric: tabular-nums;
     }
     #loader-hud .legend {
@@ -403,47 +452,41 @@
   </style>
 </head>
 <body>
-  <div id="controls">
+  <!-- ═══ Single Nav Bar ═══ -->
+  <div id="navbar">
     <h1>the context map</h1>
-    <div class="ctrl-divider"></div>
+    <div class="nav-tabs">
+      <button class="nav-tab active" data-view="flythrough" onclick="switchView('flythrough')">Loading</button>
+      <button class="nav-tab" data-view="graph" onclick="switchView('graph')">Graph</button>
+      <button class="nav-tab" data-view="fs-timeline" onclick="switchView('fs-timeline')">FS Timeline</button>
+      <button class="nav-tab" data-view="heatmap" onclick="switchView('heatmap')">Heatmap</button>
+    </div>
+    <div class="nav-sep"></div>
     <div id="searchBox">
       <span class="search-icon">&#x1F50D;</span>
-      <input type="text" id="searchInput" placeholder="search messages, files, topics..." autocomplete="off">
-      <span class="search-kbd"><kbd class="bright">&#8984;K</kbd></span>
-      <select id="searchTypeSelect"><option value="all">all</option><option value="messages">messages</option><option value="files">files</option></select>
+      <input type="text" id="searchInput" placeholder="search..." autocomplete="off">
+      <select id="searchTypeSelect"><option value="all">all</option><option value="messages">msg</option><option value="files">files</option></select>
       <div id="searchSuggestions"></div>
     </div>
-    <div class="ctrl-divider"></div>
-    <div class="ctrl-group">
-      <span class="ctrl-group-label">time</span>
-      <div class="time-filters">
-        <button class="time-btn active" data-range="all">all</button>
-        <button class="time-btn" data-range="month">month</button>
-        <button class="time-btn" data-range="week">week</button>
-        <button class="time-btn" data-range="today">today</button>
-        <button class="time-btn" data-range="1h">1h</button>
-      </div>
+    <div class="time-filters">
+      <button class="time-btn active" data-range="all">all</button>
+      <button class="time-btn" data-range="month">mo</button>
+      <button class="time-btn" data-range="week">wk</button>
+      <button class="time-btn" data-range="48h">48h</button>
+      <button class="time-btn" data-range="24h">24h</button>
+      <button class="time-btn" data-range="1h">1h</button>
     </div>
-    <div class="ctrl-divider"></div>
-    <div class="ctrl-group">
-      <span class="ctrl-group-label">project</span>
-      <select id="projectFilter"><option value="">all</option></select>
+    <select id="projectFilter" style="background:#1a1a2a;border:1px solid #444;color:#ddd;padding:4px 8px;border-radius:4px;font-size:13px;font-family:inherit;max-width:200px;"><option value="">all projects</option></select>
+    <input type="range" id="minSessions" min="1" max="10" value="2" title="Min co-occurrences — how many sessions two files must share to be connected" style="width:60px;">
+    <span id="minSessionsVal" style="font-size:11px;color:#7b7bff;">1</span>
+    <div class="nav-right">
+      <span id="statNodes" class="nav-stat">0</span> files
+      <span id="statEdges" class="nav-stat">0</span> links
+      <span id="statShared" class="nav-stat">0</span> sessions
     </div>
-    <div class="ctrl-divider"></div>
-    <div class="ctrl-group">
-      <span class="ctrl-group-label">min shared</span>
-      <input type="range" id="minSessions" min="1" max="10" value="1">
-      <span id="minSessionsVal" style="font-size:11px;color:#7b7bff;min-width:12px;">1</span>
-    </div>
-    <div class="stats">
-      <span id="statNodes">0</span> nodes &middot;
-      <span id="statEdges">0</span> edges &middot;
-      <span id="statShared">0</span> shared
-    </div>
-    <button id="patternsBtn" title="Repeated commands" onclick="showPatterns()">&#x21BB;</button>
-    <button id="helpBtn" title="Tour" onclick="tour.start()">?</button>
-    <button id="backTo3dBtn" title="Back to 3D flythrough" onclick="showFlythrough()" style="background:none;border:1px solid #333;color:#666;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:inherit;display:none;">&#9664; 3D</button>
   </div>
+  <div id="orientBar"></div>
+  <div id="controls" class="hidden"></div>
 
   <div id="loader">
     <canvas id="loaderCanvas"></canvas>
@@ -454,11 +497,11 @@
       <div class="status" id="loaderStatus">initializing...</div>
       <div class="counter" id="loaderCounter"></div>
       <div class="legend">
-        <span><div class="dot" style="background:#ffaa55"></div><span style="color:#cc8844">> prompts</span></span>
-        <span><div class="dot" style="background:#55ff88"></div><span style="color:#44cc66">| code</span></span>
-        <span><div class="dot" style="background:#77ccff"></div><span style="color:#5599cc">&larr; responses</span></span>
-        <span><div class="dot" style="background:#55aaee"></div><span style="color:#4488bb">files</span></span>
-        <span><div class="dot" style="background:#ffdd44"></div><span style="color:#ccaa33">titles</span></span>
+        <span><div class="dot" style="background:#ffaa55"></div><span style="color:#ffbb66">> prompts</span></span>
+        <span><div class="dot" style="background:#55ff88"></div><span style="color:#66ee88">| code</span></span>
+        <span><div class="dot" style="background:#77ccff"></div><span style="color:#88ccff">&larr; responses</span></span>
+        <span><div class="dot" style="background:#55aaee"></div><span style="color:#66bbff">files</span></span>
+        <span><div class="dot" style="background:#ffdd44"></div><span style="color:#ffdd66">titles</span></span>
       </div>
       <div class="hud-search">
         <span class="hud-search-icon">&#x1F50D;</span>
@@ -483,9 +526,12 @@
         <button class="speed-btn" data-speed="2">2x</button>
         <button class="speed-btn" data-speed="4">4x</button>
       </div>
-      <button class="movie-exit" id="movieExit" title="Show graph">Graph &rarr;</button>
+      <button class="movie-exit" id="movieExit" title="Show graph" onclick="switchView('graph')">Graph &rarr;</button>
     </div>
   </div>
+
+  <canvas id="fsTimelineCanvas" style="display:none;position:fixed;top:52px;left:0;width:100vw;height:calc(100vh - 52px);z-index:20;"></canvas>
+  <canvas id="heatmapCanvas" style="display:none;position:fixed;top:52px;left:0;width:100vw;height:calc(100vh - 52px);z-index:20;"></canvas>
 
   <!-- Right-side timeline -->
   <div id="timeline">
@@ -580,7 +626,7 @@ let queueTimer = 0; // accumulator for draining queue
 function resizeCanvas() {
   const dpr = devicePixelRatio || 1;
   loaderCanvas.width = innerWidth * dpr;
-  loaderCanvas.height = innerHeight * dpr;
+  loaderCanvas.height = (innerHeight - 52) * dpr;
   lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 resizeCanvas();
@@ -683,6 +729,13 @@ class Particle {
   update(dt) {
     // When paused, slow particles to a gentle drift instead of full stop
     if (movieStarted && !moviePlaying) dt *= 0.05;
+    // Freeze if near cursor
+    if (this.z > 0) {
+      const sc = 600 / this.z;
+      const sx = W()/2 + this.x * sc;
+      const sy = H()/2 + this.y * sc;
+      if (nearCursor(sx, sy)) return; // frozen in place
+    }
     // Accelerate as loading progresses: 1x at 0%, up to 3x at 100%
     const accel = (1 + (loadProgress / 100) * 2) * (movieStarted ? movieSpeed : 1);
     this.z += this.vz * accel * dt;
@@ -835,6 +888,11 @@ class TimePlane {
     this.hue = Math.random() > 0.5 ? [100, 130, 255] : [130, 100, 255]; // blue-purple tints
   }
   update(dt) {
+    // Freeze if near cursor
+    if (this.z > 0) {
+      const sc = 600 / this.z;
+      if (nearCursor(W()/2, H()/2 + sc * 10)) return this.z > -50; // time planes are centered
+    }
     const accel = 1 + (loadProgress / 100) * 2;
     this.z += this.vz * accel * dt;
     // Fade in, hold bright, fade out
@@ -969,6 +1027,23 @@ function relTime(d) {
 // Init particles
 for (let i = 0; i < 100; i++) particlePool.push(new Particle());
 
+// Cursor tracking — freeze nearby objects when mouse is in the loader area
+let loaderCursor = null;
+const LOADER_CURSOR_RADIUS = 150; // px radius of freeze zone
+loaderCanvas.addEventListener("mousemove", function(e) {
+  loaderCursor = { x: e.offsetX, y: e.offsetY };
+});
+loaderCanvas.addEventListener("mouseleave", function() {
+  loaderCursor = null;
+});
+
+// Check if a screen-space point is near the cursor
+function nearCursor(sx, sy) {
+  if (!loaderCursor) return false;
+  const dx = sx - loaderCursor.x, dy = sy - loaderCursor.y;
+  return (dx * dx + dy * dy) < LOADER_CURSOR_RADIUS * LOADER_CURSOR_RADIUS;
+}
+
 let lt = performance.now();
 function animateLoader(now) {
   if (!loaderRunning) return;
@@ -990,10 +1065,12 @@ function animateLoader(now) {
   lctx.lineWidth = 1;
   for (const gl of gridLines) {
     const accelEnv = 1 + (loadProgress / 100) * 2;
-    gl.z += gl.vz * accelEnv * dt;
-    if (gl.z < 1) { gl.z = 2000; gl.x = (Math.random()-0.5)*2000; }
     const s = 600 / gl.z;
     const sx = W()/2 + gl.x * s;
+    if (!nearCursor(sx, H()/2)) {
+      gl.z += gl.vz * accelEnv * dt;
+      if (gl.z < 1) { gl.z = 2000; gl.x = (Math.random()-0.5)*2000; }
+    }
     const a = Math.min(0.08, s * 0.05);
     lctx.globalAlpha = a;
     lctx.beginPath();
@@ -1005,11 +1082,13 @@ function animateLoader(now) {
 
   // Stars
   for (const s of stars) {
-    s.z += s.vz * (1 + (loadProgress / 100) * 2) * dt;
-    if (s.z < 1) { s.z = 2000; s.x = (Math.random()-0.5)*3000; s.y = (Math.random()-0.5)*2000; }
     const sc = 600 / s.z;
     const sx = W()/2 + s.x * sc;
     const sy = H()/2 + s.y * sc;
+    if (!nearCursor(sx, sy)) {
+      s.z += s.vz * (1 + (loadProgress / 100) * 2) * dt;
+      if (s.z < 1) { s.z = 2000; s.x = (Math.random()-0.5)*3000; s.y = (Math.random()-0.5)*2000; }
+    }
     const r = Math.max(0.3, 1.2 * sc);
 
     if (s.z < 300) {
@@ -1074,7 +1153,7 @@ const loader = {
   },
   hide() {
     this.el.classList.add("done");
-    setTimeout(() => { this.el.style.display = "none"; loaderRunning = false; }, 900);
+    setTimeout(() => { this.el.style.display = "none"; loaderRunning = false; rebuildTimeline(); }, 900);
   },
   // Load discoveries into the queue and master list
   loadDiscoveries(items) {
@@ -1082,8 +1161,8 @@ const loader = {
     discoveryQueue.push(...items);
     // Start movie controls on first batch
     if (!movieStarted && items.length > 0) initMovieControls();
-    // Rebuild timeline periodically
-    if (allDiscoveries.length % 100 < items.length) rebuildTimeline();
+    // Rebuild timeline periodically (infrequent to avoid scroll disruption)
+    if (allDiscoveries.length % 500 < items.length) rebuildTimeline();
   }
 };
 
@@ -1156,48 +1235,62 @@ function _rebuildTimelineImpl(sourceItems) {
   nowEl.onclick = () => scrubTo(0);
   tlEntries.appendChild(nowEl);
 
+  // Loading indicator
+  if (loaderRunning) {
+    const loadEl = document.createElement("div");
+    loadEl.className = "tl-loading";
+    loadEl.innerHTML = '<span class="tl-loading-dot"></span> Loading\u2026';
+    tlEntries.appendChild(loadEl);
+  }
+
   for (const day of timelineSlots) {
     const dayLabel = day.date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    const dayRel = relTime(day.date);
     const barPct = maxDayCount > 0 ? Math.max(4, (day.totalCount / maxDayCount) * 100) : 4;
 
-    // Day row
+    // Day row — just label + count, no hour blocks until expanded
     const dayEl = document.createElement("div");
     dayEl.className = "tl-day";
     dayEl.dataset.firstIndex = day.firstIndex;
     dayEl.dataset.dayKey = day.date.toLocaleDateString();
     dayEl.innerHTML =
-      '<div class="tl-day-label"><span>' + dayLabel + '</span><span class="tl-arrow">&#9654;</span></div>' +
-      '<div class="tl-day-meta"><span>' + dayRel + '</span><span>' + day.totalCount + ' items</span></div>' +
+      '<div class="tl-day-label"><span>' + dayLabel + '</span><span class="tl-day-count">' + day.totalCount + '</span><span class="tl-arrow">&#9654;</span></div>' +
       '<div class="tl-day-bar"><div class="tl-day-bar-fill" style="width:' + barPct + '%"></div></div>';
+
+    // Store hour data for lazy expansion
+    dayEl._hourData = day;
+    dayEl._sourceLen = sourceItems.length;
     dayEl.onclick = (e) => {
-      // Toggle open
-      dayEl.classList.toggle("open");
-      // If not just toggling, also scrub
-      if (!e.target.closest(".tl-arrow")) {
-        scrubTo(day.firstIndex / Math.max(1, sourceItems.length));
+      const arrow = e.target.closest(".tl-arrow");
+      if (arrow) {
+        // Toggle hour expansion
+        dayEl.classList.toggle("open");
+        const hoursEl = dayEl.nextElementSibling;
+        if (dayEl.classList.contains("open") && hoursEl && hoursEl.classList.contains("tl-hours") && hoursEl.children.length === 0) {
+          // Lazy-build hour rows on first expand
+          const sorted = Array.from(dayEl._hourData.hours.entries()).sort((a, b) => b[0] - a[0]);
+          for (const [hourNum, hourData] of sorted) {
+            const hEl = document.createElement("div");
+            hEl.className = "tl-hour";
+            const hLabel = hourData.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            hEl.innerHTML = '<span>' + hLabel + '</span><span class="tl-hour-count">' + hourData.count + '</span>';
+            hEl.onclick = (ev) => {
+              ev.stopPropagation();
+              scrubTo(hourData.firstIndex / Math.max(1, dayEl._sourceLen));
+            };
+            hoursEl.appendChild(hEl);
+          }
+        }
+        e.stopPropagation();
+        return;
       }
+      // Click on day itself → scrub to it
+      scrubTo(day.firstIndex / Math.max(1, sourceItems.length));
     };
     tlEntries.appendChild(dayEl);
 
-    // Hours container (collapsible)
+    // Empty hours container (populated lazily on expand)
     const hoursEl = document.createElement("div");
     hoursEl.className = "tl-hours";
-    // Sort hours descending (newest first)
-    const sortedHours = Array.from(day.hours.entries()).sort((a, b) => b[0] - a[0]);
-    for (const [hourNum, hourData] of sortedHours) {
-      const hEl = document.createElement("div");
-      hEl.className = "tl-hour";
-      const hLabel = hourData.date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      hEl.dataset.hourKey = hourNum;
-      hEl.dataset.dayKey = day.date.toLocaleDateString();
-      hEl.innerHTML = '<span>' + hLabel + '</span><span class="tl-hour-count">' + hourData.count + '</span>';
-      hEl.onclick = (e) => {
-        e.stopPropagation();
-        scrubTo(hourData.firstIndex / Math.max(1, sourceItems.length));
-      };
-      hoursEl.appendChild(hEl);
-    }
     tlEntries.appendChild(hoursEl);
   }
 }
@@ -1281,23 +1374,12 @@ document.querySelectorAll(".speed-btn").forEach(btn => {
 
 // Exit to graph
 document.getElementById("movieExit").onclick = () => {
-  movieBar.classList.remove("active");
-  timeline.classList.remove("active");
-  loader.hide();
-  document.getElementById("backTo3dBtn").style.display = "inline-flex";
+  switchView("graph");
 };
 
 // Back to 3D flythrough from graph
 function showFlythrough() {
-  const loaderEl = document.getElementById("loader");
-  loaderEl.style.display = "";
-  loaderEl.classList.remove("done");
-  loaderRunning = true;
-  lt = performance.now();
-  requestAnimationFrame(animateLoader);
-  movieBar.classList.add("active");
-  timeline.classList.add("active");
-  document.getElementById("backTo3dBtn").style.display = "none";
+  switchView("flythrough");
 }
 
 // HUD search — filters particles and timeline to matching items
@@ -1382,6 +1464,60 @@ document.getElementById("searchInput").addEventListener("keydown",e=>{
   if(e.key==="Enter"){const q=e.target.value.trim();if(q)runSearch(q);}
 });
 document.getElementById("searchTypeSelect").addEventListener("change",()=>{const q=document.getElementById("searchInput").value.trim();if(q)runSearch(q);});
+// ═══════════════════════════════════════════════════════════════════
+// VIEW SWITCHING — unified tab navigation
+// ═══════════════════════════════════════════════════════════════════
+var currentView = "flythrough";
+function switchView(view) {
+  currentView = view;
+  // Update tab highlights
+  document.querySelectorAll(".nav-tab").forEach(function(t) {
+    t.classList.toggle("active", t.dataset.view === view);
+  });
+  // Hide everything first
+  var graph = document.getElementById("graph");
+  var loader = document.getElementById("loader");
+  var controls = document.getElementById("controls");
+  var fsCvs = document.getElementById("fsTimelineCanvas");
+  var hmCvs = document.getElementById("heatmapCanvas");
+  var movieBarEl = document.getElementById("movieBar");
+  var timelineEl = document.getElementById("timeline");
+
+  if (graph) graph.style.display = "none";
+  if (loader) loader.style.display = "none";
+  if (controls) controls.classList.add("hidden");
+  if (fsCvs) fsCvs.style.display = "none";
+  if (hmCvs) hmCvs.style.display = "none";
+  if (movieBarEl) movieBarEl.classList.remove("active");
+  if (timelineEl) timelineEl.classList.remove("active");
+
+  // Hide canvas views cleanly
+  if (typeof FsTimeline !== "undefined" && view !== "fs-timeline") FsTimeline.hide();
+  if (typeof Heatmap !== "undefined" && view !== "heatmap") Heatmap.hide();
+
+  switch (view) {
+    case "flythrough":
+      if (loader) { loader.style.display = ""; loader.classList.remove("done"); }
+      loaderRunning = true;
+      lt = performance.now();
+      requestAnimationFrame(animateLoader);
+      if (movieBarEl) movieBarEl.classList.add("active");
+      if (timelineEl) timelineEl.classList.add("active");
+      break;
+    case "graph":
+      if (graph) graph.style.display = "";
+      if (controls) controls.classList.remove("hidden");
+      loadGraph();
+      break;
+    case "fs-timeline":
+      if (typeof FsTimeline !== "undefined") FsTimeline.show();
+      break;
+    case "heatmap":
+      if (typeof Heatmap !== "undefined") Heatmap.show();
+      break;
+  }
+}
+
 document.addEventListener("keydown",function(e){
   // Don't trigger shortcuts when typing in inputs
   var tag = (e.target.tagName||"").toLowerCase();
@@ -1405,14 +1541,14 @@ document.addEventListener("keydown",function(e){
   if(e.key==="?"){e.preventDefault();document.getElementById("shortcutSheet").classList.toggle("open");return;}
 
   // 1-5 — time filters
-  var timeKeys={"1":"all","2":"month","3":"week","4":"today","5":"1h"};
+  var timeKeys={"1":"all","2":"month","3":"week","4":"48h","5":"24h","6":"1h"};
   if(timeKeys[e.key]){
     document.querySelectorAll(".time-btn").forEach(function(b){b.classList.remove("active");if(b.dataset.range===timeKeys[e.key])b.classList.add("active");});
     currentTimeRange=timeKeys[e.key];loadGraph();return;
   }
 
   // Left/Right arrows — step through time periods
-  var timeOrder=["all","month","week","today","1h"];
+  var timeOrder=["all","month","week","48h","24h","1h"];
   if(e.key==="ArrowRight"||e.key==="ArrowLeft"){
     e.preventDefault();
     var ci=timeOrder.indexOf(currentTimeRange);
@@ -1440,6 +1576,15 @@ document.addEventListener("keydown",function(e){
 
   // P — patterns
   if(e.key==="p"||e.key==="P"){showPatterns();return;}
+
+  // F — filesystem timeline
+  if(e.key==="f"||e.key==="F"){switchView(currentView==="fs-timeline"?"graph":"fs-timeline");return;}
+
+  // H — heatmap
+  if(e.key==="h"){switchView(currentView==="heatmap"?"graph":"heatmap");return;}
+
+  // G — graph
+  if(e.key==="g"){switchView("graph");return;}
 
   // T — tour
   if(e.key==="t"||e.key==="T"){tour.start();return;}
@@ -1567,6 +1712,43 @@ async function loadProjects(){
   loader.set(20,"projects loaded");
 }
 
+function updateOrientBar(graph){
+  var bar=document.getElementById("orientBar");
+  if(!bar)return;
+  // Current date
+  var now=new Date();
+  var dateStr=now.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+  var timeStr=now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+  // Time range label
+  var rangeLabels={"all":"all time","month":"last 30 days","week":"last 7 days","48h":"last 48 hours","24h":"last 24 hours","1h":"last hour"};
+  var rangeLabel=rangeLabels[currentTimeRange]||currentTimeRange;
+  // Count sessions and find time span
+  var sessions=graph.nodes.filter(function(n){return n.type==="session";});
+  var files=graph.nodes.filter(function(n){return n.type==="file";});
+  var oldest=null,newest=null;
+  for(var s of sessions){
+    var t=s.startTime?new Date(s.startTime).getTime():0;
+    if(t&&(!oldest||t<oldest))oldest=t;
+    var te=s.endTime?new Date(s.endTime).getTime():0;
+    if(te&&(!newest||te>newest))newest=te;
+  }
+  var spanStr="";
+  if(oldest&&newest){
+    var spanMs=newest-oldest;
+    if(spanMs<3600000)spanStr=Math.round(spanMs/60000)+"m span";
+    else if(spanMs<86400000)spanStr=Math.round(spanMs/3600000)+"h span";
+    else spanStr=Math.round(spanMs/86400000)+"d span";
+  }
+  // Current project
+  var proj=document.getElementById("projectFilter").value;
+  var projStr=proj?proj.split("/").pop():"all projects";
+  bar.innerHTML=
+    '<span class="orient-date">'+dateStr+' '+timeStr+'</span>'+
+    '<span class="orient-range">showing: '+rangeLabel+'</span>'+
+    '<span class="orient-summary">'+sessions.length+' sessions &middot; '+files.length+' files'+(spanStr?' &middot; '+spanStr:'')+'</span>'+
+    '<span class="orient-project">'+projStr+'</span>';
+}
+
 async function loadGraph(){
   var project=document.getElementById("projectFilter").value,min=document.getElementById("minSessions").value;
   var params=new URLSearchParams();
@@ -1599,53 +1781,153 @@ async function loadGraph(){
     });
   }
 
-  loader.set(80,"building graph...");
-  var graph=await fetch("/api/graph?"+params).then(function(r){return r.json();});
-  loader.set(90,"building graph ("+graph.nodes.length+" nodes)...");
+  if(initialLoad)loader.set(80,"building graph...");
+  // File co-occurrence graph: files as nodes, edges = co-edited in same session
+  var fgParams=new URLSearchParams();
+  if(project)fgParams.set("project",project);
+  if(min>1)fgParams.set("minCooccurrence",min);
+  if(currentTimeRange!=="all")fgParams.set("timeRange",currentTimeRange);
+  var graph=await fetch("/api/file-graph?"+fgParams).then(function(r){return r.json();});
+  if(graph.error){
+    // Fallback to old session graph
+    graph=await fetch("/api/graph?"+params).then(function(r){return r.json();});
+  }
+  if(initialLoad)loader.set(90,"building graph ("+graph.nodes.length+" nodes)...");
   document.getElementById("statNodes").textContent=graph.nodes.length;
   document.getElementById("statEdges").textContent=graph.edges.length;
-  document.getElementById("statShared").textContent=graph.stats?graph.stats.sharedFiles||0:0;
+  document.getElementById("statShared").textContent=graph.stats?graph.stats.totalSessions||graph.stats.sharedFiles||0:0;
+  updateOrientBar(graph);
   render(graph);
+  // Reset zoom to fit the new graph
+  if(!initialLoad) svg.transition().duration(400).call(zoom.transform,d3.zoomIdentity);
+  // Cache for instant reload
+  try { sessionStorage.setItem("contextmap-graph", JSON.stringify(graph)); } catch(e) {}
   if(initialLoad){
     loader.set(100,"scan complete — use controls to explore your timeline");
     // Rebuild timeline now that we have all data
     rebuildTimeline();
+    loadSuggestions();
     initialLoad=false;
   }
 }
 
 function render(graph){
   g.selectAll("*").remove();if(simulation)simulation.stop();
-  var nodes=graph.nodes,links=graph.edges.map(function(e){return{source:e.source,target:e.target,reads:e.reads,writes:e.writes};});
+  var isFileGraph=graph.edges.length>0&&graph.edges[0].weight!=null;
+  var nodes=graph.nodes;
+  var maxWeight=graph.stats?graph.stats.maxWeight||1:1;
+  var links=graph.edges.map(function(e){
+    return{source:e.source,target:e.target,reads:e.reads||0,writes:e.writes||0,weight:e.weight||1};
+  });
+  // Scale down node sizes for large graphs to prevent overlap
+  _nodeScale=nodes.length>2000?0.3:nodes.length>500?0.5:nodes.length>200?0.7:1;
   currentLinks=links;
+  var chargeScale=nodes.length>2000?0.3:nodes.length>500?0.5:1;
   simulation=d3.forceSimulation(nodes)
-    .force("link",d3.forceLink(links).id(function(d){return d.id;}).distance(80))
-    .force("charge",d3.forceManyBody().strength(function(d){return d.type==="session"?-200:-60;}))
+    .force("link",d3.forceLink(links).id(function(d){return d.id;}).distance(function(d){
+      return isFileGraph?Math.max(30,120-d.weight*8):(nodes.length>500?40:80);
+    }))
+    .force("charge",d3.forceManyBody().strength(function(d){
+      return isFileGraph?-80*chargeScale:(d.type==="session"?-200:-60)*chargeScale;
+    }))
     .force("center",d3.forceCenter(width/2,height/2))
-    .force("collision",d3.forceCollide().radius(function(d){return nodeR(d)+4;}));
+    .force("collision",d3.forceCollide().radius(function(d){return nodeR(d)+2;}));
+  // Edge color: co-occurrence weight → amber intensity
+  function edgeColor(d){
+    if(!isFileGraph)return d.writes>0?"#5b3a3a":"#2a3a4a";
+    var t=Math.min(1,d.weight/Math.max(maxWeight*0.5,1));
+    var r=Math.round(40+180*t),g=Math.round(50+100*t*t),b=Math.round(60+40*(1-t));
+    return"rgb("+r+","+g+","+b+")";
+  }
   var link=g.append("g").selectAll("line").data(links).join("line")
-    .attr("stroke",function(d){return d.writes>0?"#5b3a3a":"#2a3a4a";})
-    .attr("stroke-width",function(d){return Math.min(Math.sqrt(d.reads+d.writes),5);}).attr("stroke-opacity",0.5);
+    .attr("stroke",edgeColor)
+    .attr("stroke-width",function(d){return isFileGraph?Math.max(1,Math.min(d.weight*0.8,6)):Math.min(Math.sqrt(d.reads+d.writes),5);})
+    .attr("stroke-opacity",function(d){return isFileGraph?Math.min(0.8,0.2+d.weight/maxWeight*0.6):0.5;});
   var node=g.append("g").selectAll("g").data(nodes).join("g")
     .call(d3.drag().on("start",ds).on("drag",dd).on("end",de));
   node.append("circle").attr("r",function(d){return nodeR(d);}).attr("fill",function(d){return nodeC(d);})
     .attr("stroke",function(d){return d.type==="session"?"#7b7bff":(d.shared?"#e8a85b":"#333");})
     .attr("stroke-width",function(d){return d.type==="session"?2:(d.shared?1.5:0.5);}).attr("opacity",0.85);
-  node.filter(function(d){return d.type==="session"||d.shared;}).append("text").text(function(d){return d.label;})
-    .attr("font-size",function(d){return d.type==="session"?9:8;})
-    .attr("fill",function(d){return d.type==="session"?"#9b9bff":"#aa8855";})
+  // Labels: show for all files in file graph, or shared/sessions in old graph
+  var labelFilter=isFileGraph?function(){return true;}:function(d){return d.type==="session"||d.shared;};
+  node.filter(labelFilter).append("text").text(function(d){return d.label;})
+    .attr("font-size",function(d){return isFileGraph?(d.sessionCount>3?10:8):(d.type==="session"?9:8);})
+    .attr("fill",function(d){return d.type==="session"?"#9b9bff":(d.shared?"#cc9944":"#88aa88");})
     .attr("text-anchor","middle").attr("dy",function(d){return nodeR(d)+12;});
-  node.on("mouseover",function(e,d){tooltip.style("display","block").text(d.type==="session"?d.label+"\n"+d.project+"\n"+d.messages+" msgs, "+d.toolCalls+" tool calls":(d.fullPath||d.label)+"\n"+(d.sessionCount||1)+" session(s)");})
+  // Track cursor in graph-space for proximity damping
+  var cursorPos=null,pinnedNodes=[];
+  var CURSOR_RADIUS=120; // px radius of influence
+  svg.on("mousemove.cursor",function(e){
+    var t=d3.zoomTransform(svg.node());
+    cursorPos=[(e.offsetX-t.x)/t.k,(e.offsetY-t.y)/t.k];
+  }).on("mouseleave.cursor",function(){
+    // Release all pinned nodes
+    for(var n of pinnedNodes){n.fx=null;n.fy=null;}
+    pinnedNodes=[];cursorPos=null;
+  });
+
+  // On each tick, pin nearby nodes proportionally to distance
+  simulation.on("tick.cursor",function(){
+    if(!cursorPos)return;
+    // Release previously pinned nodes that are now far
+    for(var i=pinnedNodes.length-1;i>=0;i--){
+      var n=pinnedNodes[i];
+      var dx=n.x-cursorPos[0],dy=n.y-cursorPos[1],dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist>CURSOR_RADIUS){n.fx=null;n.fy=null;pinnedNodes.splice(i,1);}
+    }
+    // Pin nodes within radius
+    for(var n of nodes){
+      if(n.fx!==null&&n.fy!==null&&!pinnedNodes.includes(n))continue; // skip drag-pinned
+      var dx=n.x-cursorPos[0],dy=n.y-cursorPos[1],dist=Math.sqrt(dx*dx+dy*dy);
+      if(dist<CURSOR_RADIUS){
+        n.fx=n.x;n.fy=n.y;
+        if(!pinnedNodes.includes(n))pinnedNodes.push(n);
+      }
+    }
+  });
+
+  var selectedNodeId = null;
+  window._clearSelection = function() { selectedNodeId = null; restoreGraph(); };
+  function highlightNodeById(hid) {
+    g.selectAll("circle").attr("opacity",function(n){return n.id===hid?1:0.2;})
+      .attr("stroke-width",function(n){return n.id===hid?3:(n.type==="session"?2:(n.shared?1.5:0.5));});
+    g.selectAll("line").attr("stroke-opacity",function(l){return(l.source.id||l.source)===hid||(l.target.id||l.target)===hid?0.8:0.05;});
+    g.selectAll("text").attr("opacity",function(n){return n.id===hid?1:0.15;});
+  }
+  function restoreGraph() {
+    g.selectAll("circle").attr("opacity",0.85).attr("stroke-width",function(n){return n.type==="session"?2:(n.shared?1.5:0.5);});
+    g.selectAll("line").attr("stroke-opacity",0.5);
+    g.selectAll("text").attr("opacity",1);
+  }
+  node.on("mouseover",function(e,d){
+      var tip=d.type==="session"?d.label+"\n"+d.project+"\n"+d.messages+" msgs, "+d.toolCalls+" tool calls":(d.fullPath||d.label)+"\n"+(d.sessionCount||1)+" session(s)";
+      if(isFileGraph){
+        var conns=links.filter(function(l){return(l.source.id||l.source)===d.id||(l.target.id||l.target)===d.id;});
+        tip=(d.fullPath||d.label)+"\n"+d.sessionCount+" sessions, "+conns.length+" co-edited files";
+      }
+      tooltip.style("display","block").text(tip);
+      highlightNodeById(d.id);
+    })
     .on("mousemove",function(e){tooltip.style("left",(e.pageX+12)+"px").style("top",(e.pageY-12)+"px");})
-    .on("mouseout",function(){tooltip.style("display","none");})
-    .on("click",function(e,d){showDetail(d,links);});
+    .on("mouseout",function(){
+      tooltip.style("display","none");
+      // Keep selection highlighted, or restore if nothing selected
+      if (selectedNodeId) highlightNodeById(selectedNodeId);
+      else restoreGraph();
+    })
+    .on("click",function(e,d){
+      selectedNodeId = d.id;
+      highlightNodeById(d.id);
+      showDetail(d,links);
+    });
   simulation.on("tick",function(){
     link.attr("x1",function(d){return d.source.x;}).attr("y1",function(d){return d.source.y;}).attr("x2",function(d){return d.target.x;}).attr("y2",function(d){return d.target.y;});
     node.attr("transform",function(d){return"translate("+d.x+","+d.y+")";});
   });
 }
 
-function nodeR(d){if(d.type==="session")return 8+Math.sqrt(d.toolCalls||0)*0.8;if(d.shared)return 4+Math.sqrt(d.sessionCount||1)*2;return 3;}
+var _nodeScale=1;
+function nodeR(d){if(d.type==="session")return(8+Math.sqrt(d.toolCalls||0)*0.8)*_nodeScale;if(d.shared)return(4+Math.sqrt(d.sessionCount||1)*2)*_nodeScale;return 3*_nodeScale;}
 function nodeC(d){if(d.type==="session")return"#4a4aaa";if(d.shared)return"#8a6a30";return"#2a3a2a";}
 
 function showDetail(d,links){
@@ -1661,23 +1943,105 @@ function showDetail(d,links){
       '<div class="field"><span class="key">tool calls:</span> <span class="val">'+d.toolCalls+'</span></div>'+
       '<div class="field"><span class="key">files touched:</span> <span class="val">'+conn.length+'</span></div>'+
       '<button class="transcript-btn" onclick="loadTranscript(\''+d.id.replace("session:","")+'\',\''+d.label.replace(/'/g,"\\'")+'\')">View Full Transcript</button>'+
-      '<div class="file-list">'+conn.map(function(l){var f=(l.target.id||l.target),fn=f.replace("file:","").split("/").slice(-2).join("/");return'<div class="file-entry"><span class="fname" title="'+f.replace("file:","")+'">'+fn+'</span><span>'+(l.reads?'<span class="badge read">'+l.reads+'R</span>':"")+(l.writes?'<span class="badge write">'+l.writes+'W</span>':"")+'</span></div>';}).join("")+'</div>';
+      '<div class="file-list">'+conn.map(function(l){
+        var f=(l.target.id||l.target),fp=f.replace("file:",""),fn=fp.split("/").slice(-2).join("/");
+        return'<div class="file-entry"><a class="fname file-link" href="#" title="'+fp+'" onclick="event.preventDefault();showFileStory(\''+fp.replace(/'/g,"\\'")+'\')">'+fn+'</a><span>'+(l.reads?'<span class="badge read">'+l.reads+'R</span>':"")+(l.writes?'<span class="badge write">'+l.writes+'W</span>':"")+'</span></div>';
+      }).join("")+'</div>';
   }else{
+    // Show the full file story — what chats affected this file and what was done
+    showFileStory(d.fullPath||d.id.replace("file:",""));
+    return;
     var conn=links.filter(function(l){return(l.target.id||l.target)===d.id;});
+    // Enrich connections with session node data for better labels
+    var enriched=conn.map(function(l){
+      var s=l.source,sid=typeof s==="object"?s.id:s,sObj=typeof s==="object"?s:null;
+      var title=sObj?(sObj.label||""):"";
+      var time=sObj?fmtTime(sObj.startTime):"";
+      // Use title if available, otherwise show truncated ID
+      var display=title&&title.length>8?title:(sid||"").replace("session:","").slice(0,8);
+      if(display.length>40)display=display.slice(0,37)+"...";
+      return{sid:sid,display:display,time:time,reads:l.reads,writes:l.writes};
+    });
+    // Sort by time (newest first)
+    enriched.sort(function(a,b){return(b.time||"").localeCompare(a.time||"");});
     content.innerHTML='<h2>'+d.label+'</h2>'+
-      '<div class="field"><span class="key">path:</span> <span class="val">'+d.fullPath+'</span></div>'+
+      '<div class="field"><span class="key">path:</span> <span class="val" style="word-break:break-all;font-size:11px">'+d.fullPath+'</span></div>'+
       '<div class="field"><span class="key">sessions:</span> <span class="val">'+(d.sessionCount||1)+'</span></div>'+
-      '<div class="file-list"><h2 style="margin-top:10px">Sessions</h2>'+conn.map(function(l){var s=l.source,lb=typeof s==="object"?s.label:s;return'<div class="file-entry"><span class="fname">'+lb+'</span><span>'+(l.reads?'<span class="badge read">'+l.reads+'R</span>':"")+(l.writes?'<span class="badge write">'+l.writes+'W</span>':"")+'</span></div>';}).join("")+'</div>';
+      '<div class="file-list"><h2 style="margin-top:10px">Sessions</h2>'+enriched.map(function(e){
+        return'<div class="file-entry" style="flex-direction:column;gap:2px;padding:6px 0">'+
+          '<div style="display:flex;justify-content:space-between;align-items:center;width:100%">'+
+          '<a class="fname file-link" href="#" onclick="event.preventDefault();highlightNode(\''+e.sid+'\')" style="color:#9b9bff">'+e.display+'</a>'+
+          '<span style="font-size:10px;color:#555">'+e.time+'</span></div>'+
+          '<div style="font-size:10px;color:#777">'+(e.reads?e.reads+(e.reads===1?' read':' reads')+' ':'')+
+          (e.writes?e.writes+(e.writes===1?' write':' writes'):'')+'</div>'+
+          '</div>';
+      }).join("")+'</div>';
   }
 }
 
-function closeDetail(){document.getElementById("detail").classList.remove("open");}
+// File story — shows the timeline of all interactions with a specific file
+async function showFileStory(filePath) {
+  var panel=document.getElementById("detail"),content=document.getElementById("detailContent");
+  panel.classList.add("open");
+  var fn = filePath.split("/").slice(-2).join("/");
+  content.innerHTML='<h2 style="word-break:break-all">'+fn+'</h2>'+
+    '<div class="field"><span class="key">path:</span> <span class="val" style="word-break:break-all;font-size:10px">'+filePath+'</span></div>'+
+    '<div style="color:#555;font-size:11px;margin:8px 0">Loading file story...</div>';
+
+  try {
+    var story = await fetch("/api/file-story?path="+encodeURIComponent(filePath)).then(function(r){return r.json();});
+    if (story.error) throw new Error(story.error);
+
+    var html = '<h2 style="word-break:break-all">'+fn+'</h2>'+
+      '<div class="field"><span class="key">path:</span> <span class="val" style="word-break:break-all;font-size:10px">'+filePath+'</span></div>'+
+      '<div class="field"><span class="key">sessions:</span> <span class="val">'+story.sessionCount+'</span></div>'+
+      '<div class="field"><span class="key">total touches:</span> <span class="val">'+story.totalTouches+'</span></div>'+
+      '<div style="margin-top:12px">';
+
+    for (var sd of story.sessions) {
+      var reads = sd.touches.filter(function(t){return t.action==="read";}).length;
+      var writes = sd.touches.filter(function(t){return t.action==="write";}).length;
+      var tools = {};
+      for (var t of sd.touches) { tools[t.tool||"unknown"] = (tools[t.tool||"unknown"]||0)+1; }
+
+      html += '<div style="border-left:3px solid #3a3a6a;padding:6px 10px;margin-bottom:8px;background:#0c0c16;border-radius:0 4px 4px 0">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center">';
+      html += '<a class="file-link" href="#" onclick="event.preventDefault();highlightNode(\'session:'+sd.sessionId+'\')" style="color:#9b9bff;font-size:12px;font-weight:600">'+sd.title+'</a>';
+      html += '<span style="font-size:10px;color:#555">'+fmtTime(sd.startTime)+'</span>';
+      html += '</div>';
+      html += '<div style="margin-top:4px;font-size:11px;color:#999">'+(reads?reads+(reads===1?" read":" reads")+"  ":"")+(writes?writes+(writes===1?" write":" writes"):"")+'</div>';
+      if (sd.nearestPrompt) {
+        html += '<div style="margin-top:6px;font-size:11px;color:#cc8844;font-style:italic">&gt; '+sd.nearestPrompt.replace(/</g,"&lt;")+'</div>';
+      }
+      html += '<div style="margin-top:4px;font-size:10px;color:#555">'+Object.entries(tools).map(function(e){return e[0]+" &times;"+e[1];}).join(", ")+'</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+    content.innerHTML = html;
+  } catch(err) {
+    content.innerHTML += '<div style="color:#e55;font-size:11px">Error: '+err.message+'</div>';
+  }
+}
+
+function closeDetail(){
+  document.getElementById("detail").classList.remove("open");
+  // Clear selection — find the render scope's selectedNodeId via a global
+  if (window._clearSelection) window._clearSelection();
+}
 function fmtTime(ts){if(!ts)return"?";var d=new Date(ts);return d.toLocaleDateString()+" "+d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});}
 function ds(e){if(!e.active)simulation.alphaTarget(0.3).restart();e.subject.fx=e.subject.x;e.subject.fy=e.subject.y;}
 function dd(e){e.subject.fx=e.x;e.subject.fy=e.y;}
 function de(e){if(!e.active)simulation.alphaTarget(0);e.subject.fx=null;e.subject.fy=null;}
 
-document.getElementById("projectFilter").addEventListener("change",loadGraph);
+document.getElementById("projectFilter").addEventListener("change",function(){
+  if(currentView==="heatmap"){
+    if(typeof Heatmap!=="undefined")Heatmap.refresh();
+  } else if(currentView==="flythrough"||loaderRunning){
+    switchView("graph");
+  } else {
+    loadGraph();
+  }
+});
 document.getElementById("minSessions").addEventListener("input",function(e){document.getElementById("minSessionsVal").textContent=e.target.value;loadGraph();});
 
 // ── Tour ──
@@ -1717,7 +2081,42 @@ var tour={
 };
 
 loadProjects();
-loadGraph().then(function(){if(tour.shouldShow())setTimeout(function(){tour.start();},600);});
+
+// Fast reload: if we have cached graph data, skip flythrough and show graph instantly
+(function() {
+  var cached = sessionStorage.getItem("contextmap-graph");
+  if (cached) {
+    try {
+      var graph = JSON.parse(cached);
+      initialLoad = false;
+      document.getElementById("statNodes").textContent = graph.nodes.length;
+      document.getElementById("statEdges").textContent = graph.edges.length;
+      document.getElementById("statShared").textContent = graph.stats ? graph.stats.sharedFiles || 0 : 0;
+      updateOrientBar(graph);
+      render(graph);
+      switchView("graph");
+      // Refresh in background for fresh data
+      fetch("/api/graph").then(function(r){return r.json();}).then(function(g){
+        sessionStorage.setItem("contextmap-graph", JSON.stringify(g));
+        document.getElementById("statNodes").textContent = g.nodes.length;
+        document.getElementById("statEdges").textContent = g.edges.length;
+        document.getElementById("statShared").textContent = g.stats ? g.stats.sharedFiles || 0 : 0;
+        updateOrientBar(g);
+        render(g);
+      }).catch(function(){});
+      // Load discoveries in background for timeline (non-blocking)
+      fetch("/api/scan-stream").then(function(){}).catch(function(){});
+      loadSuggestions();
+      return;
+    } catch(e) { sessionStorage.removeItem("contextmap-graph"); }
+  }
+  // First visit: do full flythrough + load
+  loadGraph().then(function(){
+    if(tour.shouldShow()) setTimeout(function(){tour.start();},600);
+  });
+})();
 </script>
+<script src="fs-timeline.js"></script>
+<script src="heatmap.js"></script>
 </body>
 </html>

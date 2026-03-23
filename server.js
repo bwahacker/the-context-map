@@ -1,11 +1,46 @@
 const express = require("express");
 const path = require("path");
 const { scanAllSessions } = require("./scanner");
+const store = require("./db");
+const gitScanner = require("./git-scanner");
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.static(path.join(__dirname, "public")));
+
+// DuckDB init + background sync
+let dbReady = false;
+(async () => {
+  try {
+    await store.init();
+    console.time("db-sync");
+    const result = await store.sync((evt) => {
+      if (evt.pct % 25 === 0 && evt.done === Math.floor(evt.total * evt.pct / 100)) {
+        console.log(`  db sync: ${evt.pct}% (${evt.scanned} scanned, ${evt.skipped} skipped)`);
+      }
+    });
+    console.timeEnd("db-sync");
+    console.log(`DB ready: ${result.scanned} scanned, ${result.skipped} skipped, ${result.total} total`);
+    dbReady = true;
+    // Git history sync (non-blocking — runs after DB is ready)
+    gitScanner.syncGitHistory(store, (evt) => {
+      console.log(`  git sync: ${evt.pct}% — ${evt.repo} (${evt.commits} commits)`);
+    }).then(r => console.log(`Git sync done: ${r.reposScanned} repos, ${r.commitsInserted} commits`))
+      .catch(e => console.error("Git sync error:", e.message));
+  } catch (err) {
+    console.error("DuckDB init failed, falling back to scanner:", err.message);
+  }
+})();
+
+// Re-sync DB periodically (every 60s) to pick up new sessions
+setInterval(async () => {
+  if (!dbReady) return;
+  try {
+    await store.sync();
+    await gitScanner.syncGitHistory(store);
+  } catch (e) { console.error("bg sync:", e.message); }
+}, 60_000);
 
 let cachedData = null;
 let cacheTime = 0;
@@ -21,7 +56,7 @@ async function getData() {
   return cachedData;
 }
 
-// SSE endpoint — streams file/snippet discoveries during scan
+// SSE endpoint — streams discoveries for the flythrough loader
 app.get("/api/scan-stream", async (req, res) => {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -37,22 +72,27 @@ app.get("/api/scan-stream", async (req, res) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  // If cached, stream discoveries from cache in reverse-chrono order
-  const now = Date.now();
-  if (cachedData && now - cacheTime < CACHE_TTL) {
-    send("progress", { pct: 100, done: 0, total: 0 });
-    // Stream a sample of cached discoveries (already sorted newest-first)
-    const sample = cachedData.discoveries.slice(0, 800);
-    send("discoveries", { items: sample });
-    send("done", { nodes: cachedData.graph.nodes.length, edges: cachedData.graph.edges.length });
+  // If DuckDB is ready, pull discoveries from the DB — no re-scan needed
+  if (dbReady) {
+    send("progress", { pct: 50, done: 1, total: 1 });
+    try {
+      const [discoveries, counts] = await Promise.all([
+        store.getDiscoveries(),
+        store.getQuickCounts(),
+      ]);
+      send("discoveries", { items: discoveries });
+      send("progress", { pct: 100, done: 1, total: 1 });
+      send("done", counts);
+    } catch (err) {
+      console.error("scan-stream DuckDB error:", err.message);
+      send("done", { nodes: 0, edges: 0, shared: 0 });
+    }
     res.end();
     return;
   }
 
-  // Stream discoveries LIVE during scan — batch and flush frequently
+  // Fallback: full scan via scanner.js (first run before DB is ready)
   let pendingBatch = [];
-  const budget = { prompt: 400, code: 400, response: 300, file: 200, snippet: 150, title: 100 };
-  const counts = {};
 
   const flushBatch = () => {
     if (closed || pendingBatch.length === 0) return;
@@ -61,32 +101,22 @@ app.get("/api/scan-stream", async (req, res) => {
   };
 
   cachedData = await scanAllSessions(
-    // onProgress
     (evt) => {
       if (closed) return;
       if (evt.type === "progress") {
         send("progress", evt);
-        // Flush accumulated discoveries with each file completion
         flushBatch();
       }
     },
-    // onDiscovery — called for EACH discovery as it's found during parsing
     (item) => {
       if (closed) return;
-      const limit = budget[item.type] || 50;
-      counts[item.type] = (counts[item.type] || 0) + 1;
-      if (counts[item.type] <= limit) {
-        pendingBatch.push(item);
-        // Flush every 30 items for responsive streaming
-        if (pendingBatch.length >= 30) flushBatch();
-      }
+      pendingBatch.push(item);
+      if (pendingBatch.length >= 30) flushBatch();
     }
   );
   cacheTime = Date.now();
 
   if (closed) return;
-
-  // Flush any remaining
   flushBatch();
 
   send("done", {
@@ -100,49 +130,44 @@ app.get("/api/scan-stream", async (req, res) => {
 // Search across all sessions — messages, files, commands
 app.get("/api/search", async (req, res) => {
   try {
-    const data = await getData();
     const { q, type } = req.query;
     if (!q) return res.json({ results: [] });
 
+    if (dbReady) {
+      const data = await store.search(q, type || "all");
+      return res.json(data);
+    }
+
+    // Fallback: in-memory scan
+    const data = await getData();
     const query = q.toLowerCase();
     const results = [];
 
     for (const session of data.sessions) {
-      // Search user messages
       if (!type || type === "messages" || type === "all") {
         for (const msg of (session.userMessages || [])) {
           if (msg.text.toLowerCase().includes(query)) {
             results.push({
-              type: "message",
-              sessionId: session.id,
+              type: "message", sessionId: session.id,
               sessionTitle: session.title || session.id.slice(0, 8),
-              project: session.project,
-              text: msg.text,
-              timestamp: msg.timestamp,
+              project: session.project, text: msg.text, timestamp: msg.timestamp,
             });
           }
         }
       }
-
-      // Search files touched
       if (!type || type === "files" || type === "all") {
         for (const fi of session.fileInteractions) {
           if (fi.file.toLowerCase().includes(query)) {
             results.push({
-              type: "file",
-              sessionId: session.id,
+              type: "file", sessionId: session.id,
               sessionTitle: session.title || session.id.slice(0, 8),
-              project: session.project,
-              file: fi.file,
-              action: fi.action,
-              timestamp: fi.timestamp,
+              project: session.project, file: fi.file, action: fi.action, timestamp: fi.timestamp,
             });
           }
         }
       }
     }
 
-    // Deduplicate file results — group by file + session
     if (!type || type === "files" || type === "all") {
       const fileMap = new Map();
       const nonFileResults = results.filter(r => r.type !== "file");
@@ -155,10 +180,8 @@ app.get("/api/search", async (req, res) => {
       results.push(...nonFileResults, ...Array.from(fileMap.values()));
     }
 
-    // Sort by timestamp desc
     results.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
-
-    res.json({ results: results.slice(0, 200), total: results.length });
+    res.json({ results, total: results.length });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -168,12 +191,15 @@ app.get("/api/search", async (req, res) => {
 // Frequent user commands / repeated patterns
 app.get("/api/patterns", async (req, res) => {
   try {
-    const data = await getData();
-    const freq = new Map(); // text -> {count, sessions}
+    if (dbReady) {
+      const patterns = await store.getPatterns();
+      return res.json({ patterns });
+    }
 
+    const data = await getData();
+    const freq = new Map();
     for (const session of data.sessions) {
       for (const msg of (session.userMessages || [])) {
-        // Normalize: lowercase, trim, collapse whitespace
         const norm = msg.text.toLowerCase().trim().replace(/\s+/g, " ");
         if (norm.length < 5 || norm.length > 200) continue;
         if (!freq.has(norm)) freq.set(norm, { text: msg.text, count: 0, sessions: new Set() });
@@ -182,14 +208,11 @@ app.get("/api/patterns", async (req, res) => {
         entry.sessions.add(session.id);
       }
     }
-
-    // Find near-duplicates using simple prefix matching
     const patterns = Array.from(freq.values())
       .filter(e => e.count >= 2 || e.sessions.size >= 2)
       .map(e => ({ text: e.text, count: e.count, sessionCount: e.sessions.size }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 50);
-
+;
     res.json({ patterns });
   } catch (err) {
     console.error(err);
@@ -197,11 +220,26 @@ app.get("/api/patterns", async (req, res) => {
   }
 });
 
+// File co-occurrence graph — files connected by how often they're edited together
+app.get("/api/file-graph", async (req, res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+    const { project, minCooccurrence, timeRange } = req.query;
+    const graph = await store.getFileGraph({ project, minCooccurrence, timeRange });
+    res.json(graph);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get("/api/graph", async (req, res) => {
   try {
-    const data = await getData();
     const { project, minSessions, timeRange } = req.query;
 
+    if (dbReady) {
+      const graph = await store.getGraph({ project, minSessions, timeRange });
+      return res.json(graph);
+    }
+
+    const data = await getData();
     let graph = data.graph;
 
     // Filter by time range
@@ -209,7 +247,9 @@ app.get("/api/graph", async (req, res) => {
       const now = Date.now();
       const cutoffs = {
         "1h": now - 60 * 60 * 1000,
-        "today": new Date().setHours(0, 0, 0, 0),
+        "24h": now - 24 * 60 * 60 * 1000,
+        "48h": now - 48 * 60 * 60 * 1000,
+        "today": now - 24 * 60 * 60 * 1000,
         "week": now - 7 * 24 * 60 * 60 * 1000,
         "month": now - 30 * 24 * 60 * 60 * 1000,
       };
@@ -277,33 +317,65 @@ app.get("/api/graph", async (req, res) => {
   }
 });
 
+app.get("/api/heatmap", async (req, res) => {
+  try {
+    if (!dbReady) return res.json({ fileActivity: [], msgActivity: [], dateRange: {} });
+    const { project } = req.query;
+    const data = await store.getHeatmapData(project);
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/sessions", async (req, res) => {
-  const data = await getData();
-  const sessions = data.sessions.map((s) => ({
-    id: s.id,
-    title: s.title,
-    project: s.project,
-    branch: s.branch,
-    startTime: s.startTime,
-    endTime: s.endTime,
-    messages: s.messages,
-    toolCalls: s.toolCalls.length,
-    filesRead: s.fileInteractions.filter((f) => f.action === "read").length,
-    filesWritten: s.fileInteractions.filter((f) => f.action === "write").length,
-  }));
-  res.json(sessions);
+  try {
+    if (dbReady) {
+      const rows = await store.query(`
+        SELECT s.id, s.title, s.project, s.branch, s.start_time AS "startTime",
+               s.end_time AS "endTime", s.messages, s.tool_calls AS "toolCalls",
+               COUNT(*) FILTER (WHERE fi.action = 'read') AS "filesRead",
+               COUNT(*) FILTER (WHERE fi.action = 'write') AS "filesWritten"
+        FROM sessions s
+        LEFT JOIN file_interactions fi ON fi.session_id = s.id
+        GROUP BY s.id, s.title, s.project, s.branch, s.start_time, s.end_time, s.messages, s.tool_calls
+        ORDER BY s.start_time
+      `);
+      return res.json(rows);
+    }
+    const data = await getData();
+    const sessions = data.sessions.map((s) => ({
+      id: s.id, title: s.title, project: s.project, branch: s.branch,
+      startTime: s.startTime, endTime: s.endTime, messages: s.messages,
+      toolCalls: s.toolCalls.length,
+      filesRead: s.fileInteractions.filter((f) => f.action === "read").length,
+      filesWritten: s.fileInteractions.filter((f) => f.action === "write").length,
+    }));
+    res.json(sessions);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
 app.get("/api/projects", async (req, res) => {
-  const data = await getData();
-  res.json(data.projects);
+  try {
+    if (dbReady) return res.json(await store.getProjects());
+    const data = await getData();
+    res.json(data.projects);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
 app.get("/api/session/:id", async (req, res) => {
-  const data = await getData();
-  const session = data.sessions.find((s) => s.id === req.params.id);
-  if (!session) return res.status(404).json({ error: "not found" });
-  res.json(session);
+  try {
+    if (dbReady) {
+      const session = await store.getSession(req.params.id);
+      if (!session) return res.status(404).json({ error: "not found" });
+      return res.json(session);
+    }
+    const data = await getData();
+    const session = data.sessions.find((s) => s.id === req.params.id);
+    if (!session) return res.status(404).json({ error: "not found" });
+    res.json(session);
+  } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
 });
 
 // Full message transcript for a session
@@ -385,13 +457,13 @@ app.get("/api/suggestions", async (req, res) => {
     const suggestions = [];
 
     // Topic clusters: find most common words across user messages (skip stopwords)
-    const stopwords = new Set(["the","a","an","and","or","but","in","on","at","to","for","of","with","by","is","it","this","that","i","we","you","me","my","can","do","did","will","be","have","has","had","not","no","so","if","from","up","out","as","all","just","get","got","make","let","its","are","was","were","been","dont","im","ive","also","would","should","could","what","how","when","where","why","there","here","then","than","them","they","these","those","about","into","over","after","before","need","want","like","use","file","code"]);
+    const stopwords = new Set(["the","a","an","and","or","but","in","on","at","to","for","of","with","by","is","it","this","that","i","we","you","me","my","can","do","did","will","be","have","has","had","not","no","so","if","from","up","out","as","all","just","get","got","make","let","its","are","was","were","been","dont","im","ive","also","would","should","could","what","how","when","where","why","there","here","then","than","them","they","these","those","about","into","over","after","before","need","want","like","use","file","code","user","line","true","false","null","undefined","data","type","name","text","value","string","number","function","return","const","class","import","export","async","await","each","some","more","most","other","only","very","same","such","take","give","look","come","find","made","goes","work","used","using","please","thanks","sure","okay","yeah","right","well","note","added","following","based","should","must","does","done","already","actually","still","even","though","because","since","while","until","next","last","first","every","many","much","back","down","through","between","both","being","during","another","which","their","them","your","our","called","within","along","around","upon","under","above","below","help","keep","thing","things","show","read","write","path","tool","input","content","message","entry","block","error","check","update","result","change","changes","changed"]);
     const wordFreq = new Map();
     for (const session of data.sessions) {
       for (const msg of (session.userMessages || [])) {
         const words = msg.text.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/);
         for (const w of words) {
-          if (w.length < 4 || stopwords.has(w)) continue;
+          if (w.length < 4 || stopwords.has(w) || /^\d+$/.test(w)) continue;
           wordFreq.set(w, (wordFreq.get(w) || 0) + 1);
         }
       }
@@ -456,8 +528,14 @@ app.get("/api/suggestions", async (req, res) => {
 // Replay endpoint — returns timestamped events for today (or a given range)
 app.get("/api/replay", async (req, res) => {
   try {
-    const data = await getData();
     const range = req.query.range || "today";
+
+    if (dbReady) {
+      const events = await store.getReplayEvents(range);
+      return res.json({ events, range });
+    }
+
+    const data = await getData();
     const now = Date.now();
     const cutoffs = {
       "1h": now - 60 * 60 * 1000,
@@ -506,6 +584,105 @@ app.get("/api/replay", async (req, res) => {
   }
 });
 
+// DB stats
+app.get("/api/stats", async (req, res) => {
+  try {
+    if (dbReady) return res.json(await store.getStats());
+    res.json({ error: "DB not ready" });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// File story — all sessions that touched a file, with context
+app.get("/api/file-story", async (req, res) => {
+  try {
+    const { path } = req.query;
+    if (!path) return res.status(400).json({ error: "path required" });
+    if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+    const story = await store.getFileStory(path);
+    res.json(story);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Force DB re-sync
+app.post("/api/sync", async (req, res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+    const result = await store.sync();
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Arbitrary SQL query (dev/debug only)
+app.get("/api/sql", async (req, res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+    const { q } = req.query;
+    if (!q) return res.json({ error: "provide ?q=SQL" });
+    // Safety: read-only
+    if (/^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE)/i.test(q)) {
+      return res.status(403).json({ error: "read-only" });
+    }
+    const rows = await store.query(q);
+    res.json({ rows, count: rows.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Git History Endpoints ──
+
+app.get("/api/git/repos", async (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+  try {
+    const repos = await store.getGitRepos();
+    res.json(repos);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/git/tree", async (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+  try {
+    const { repo, before, limit } = req.query;
+    if (!repo) return res.status(400).json({ error: "repo required" });
+    const tree = await store.getGitTree(repo, before || new Date().toISOString(), parseInt(limit) || 500);
+    res.json(tree);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/git/changes", async (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+  try {
+    const { repo, start, end } = req.query;
+    if (!repo || !start || !end) return res.status(400).json({ error: "repo, start, end required" });
+    const changes = await store.getGitChanges(repo, start, end);
+    res.json(changes);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/git/activity", async (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: "DB not ready" });
+  try {
+    const { repo, at, window: win } = req.query;
+    if (!repo || !at) return res.status(400).json({ error: "repo, at required" });
+    const activity = await store.getActivityNear(repo, at, parseInt(win) || 30);
+    res.json(activity);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Serve /timeline as the same index.html (SPA route)
+app.get("/timeline", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
 app.listen(PORT, () => {
   console.log(`Context Map running at http://localhost:${PORT}`);
+});
+
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log("\nShutting down...");
+  await store.close();
+  process.exit(0);
+});
+process.on("SIGTERM", async () => {
+  await store.close();
+  process.exit(0);
 });
